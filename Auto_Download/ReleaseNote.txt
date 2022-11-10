@@ -1,0 +1,17 @@
+﻿[Version 1]
+Support data downloading from tester type ETS, Fusion ,T2K, T3347 and LTX
+
+[Version 2]
+Add LTX Histogram
+
+[Version 3]
+add Shibasoku tester
+
+[Version 3.1]
+Supp "PASV" mode downloading for a207bukt (RET2 transfer mode active)
+
+[Version 4]
+Add in enable/disable Datalog download option
+Config File add in “Datalog”
+Xml file name change
+Add in release note
