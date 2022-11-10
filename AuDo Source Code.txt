@@ -1,0 +1,2311 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Text.RegularExpressions;
+using System.Windows.Forms;
+using System.Xml;
+using System.Diagnostics;
+using System.Threading.Tasks;
+
+namespace Auto_Dowload
+{
+    public partial class Form1 : Form
+    {
+        public Form1()
+        {
+            InitializeComponent();
+            Load += Form1_Shown;
+        }
+        /*----------------------------------------------------------------------------------------------Form_Load-------------------------------------------------------------------------------------------------------*/
+        private void Form1_Load(object sender, EventArgs e)     //Load FTP check connection and will check INI if download once startup enable?
+        {
+            //check_INI();
+            label1.Text = DateTime.Now.ToString();
+
+            Timer MyTimer = new Timer();// FTP auto download time      
+            MyTimer.Interval = (12 * 60 * 60 * 1000); // 12 hours
+            MyTimer.Tick += new EventHandler(MyTimer_FTP_Download);
+            MyTimer.Start();
+
+            //Timer PingFTP1 = new Timer();// Ping FTP timer
+            //PingFTP1.Interval = (1 * 30 * 60 * 1000); // 15 min
+            //PingFTP1.Tick += new EventHandler(MyTimer_FTP_Ping);
+            //PingFTP1.Start();
+
+            string path = Application.StartupPath.ToString();
+            var MyIni = new IniFile(path + "\\" + "Tester.ini");            //INI section to read related tester information
+
+            string tester_ini_count = MyIni.Read("Tester_Count", "Info");
+            string startup_DL = MyIni.Read("Startup_DL", "Info");
+            int tester_ini_count_int = Convert.ToInt32(tester_ini_count);
+
+            string tester_ini_naming = MyIni.Read("Tester_Name", "Info");
+            string[] tester_num = tester_ini_naming.Split('/');
+
+
+        }
+        /*----------------------------------------------------------------------------------------------Form_Shown-------------------------------------------------------------------------------------------------------*/
+        private void Form1_Shown(object sender, EventArgs e)
+        {
+            //DisplayStorage();
+            string path = Application.StartupPath.ToString();
+            var MyIni = new IniFile(path + "\\" + "Tester.ini");            //INI section to read related tester information
+
+            string tester_ini_count = MyIni.Read("Tester_Count", "Info");
+            string startup_DL = MyIni.Read("Startup_DL", "Info");
+            int tester_ini_count_int = Convert.ToInt32(tester_ini_count);
+
+            string tester_ini_naming = MyIni.Read("Tester_Name", "Info");
+            string[] tester_num = tester_ini_naming.Split('/');
+
+            //dataGridView1.ColumnCount = 2;
+            //dataGridView1.RowCount = tester_ini_count_int;
+
+            //for (int DGV = 0; DGV < tester_ini_count_int; DGV++)          //load how many tester in INI file
+            //{
+            //    dataGridView1[0, DGV].Value = tester_num[DGV].ToString();
+            //}
+            //PingFTP();
+
+            if (startup_DL == "Y")
+            {
+                //Task t = Task.Run
+                //(
+                //        () =>
+                //    {
+                longDownload();
+                //    }
+                //);
+                //t.Wait();
+                Application.Exit();
+            }
+        }
+
+        /*----------------------------------------------------------------------------------------------Ping_FTP-------------------------------------------------------------------------------------------------------*/
+        private void PingFTP()          //Check FTP connection every 5min regardless correct user and login password
+        {
+            string path = Application.StartupPath.ToString();
+            var MyIni = new IniFile(path + "\\" + "Tester.ini");
+
+            string tester_ini_naming = MyIni.Read("Tester_Name", "Info");
+            string[] tester_num = tester_ini_naming.Split('/');
+
+            string tester_ini_count = MyIni.Read("Tester_Count", "Info");
+            int tester_ini_count_int = Convert.ToInt32(tester_ini_count);
+
+            Ping pingFTP = new Ping();
+            for (int DGV = 0; DGV <= tester_ini_count_int - 1; DGV++)
+            {
+                string temp = (MyIni.Read("FTP_URL_Ori", tester_num[DGV]));
+                PingReply PR = pingFTP.Send(temp);
+                if (PR.Status.ToString().Equals("Success"))
+                {
+                    //dataGridView1[1, DGV].Style.BackColor = Color.GreenYellow;
+                }
+                else
+                {
+                    //dataGridView1[1, DGV].Style.BackColor = Color.Red;
+                    File.AppendAllText(path + "//date.txt", DateTime.Now.ToString() + "    " + temp + "  " + Environment.NewLine);
+                }
+            }
+        }
+        /*----------------------------------------------------------------------------------------------General_Function-------------------------------------------------------------------------------------------------------*/
+        public List<string> GetFileList(string URL_Ori, string _ftpurl, string User, string Password)       //Get FTP file list in detail for ETS
+        {
+            //URL_Ori is the top directory and _ftpurl is the folder wish the retrieve file list available in tester
+            string startup_path = Application.StartupPath.ToString();
+            //string _ftpurl_escape = _ftpurl.Replace(@"//", @"/");
+            List<string> list = new List<string>();
+            string temp_txt = "";
+            {
+                try
+                {
+                    FtpWebRequest request = (FtpWebRequest)WebRequest.Create("ftp://" + _ftpurl + "/");  //get file list with details from FTP, only 1 IP_URL is needed
+                    request.Method = WebRequestMethods.Ftp.ListDirectoryDetails;
+                    request.Credentials = new NetworkCredential(User, Password);
+                    FtpWebResponse response = (FtpWebResponse)request.GetResponse();
+                    Stream responseStream = response.GetResponseStream();
+                    StreamReader reader = new StreamReader(responseStream);
+                    temp_txt = reader.ReadToEnd();
+                    responseStream.Close();
+                    //reader.Close();
+                    request.Abort();
+                }
+                catch (WebException)
+                {
+                    File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + "    " + _ftpurl + "  " + Environment.NewLine);
+                }
+            }
+            list = temp_txt.Split((new Char[] { '\r', '\n' }), StringSplitOptions.RemoveEmptyEntries).ToList();
+            return list;
+        }
+
+        public List<string> GetFileList_Name_Only(string URL_Ori, string _ftpurl, string User, string Password)         //Get filename only for ETS
+        {
+            //URL_Ori is the top directory and _ftpurl is the folder wish the retrieve file list available in tester
+            string startup_path = Application.StartupPath;
+            List<string> list = new List<string>();
+            string temp_txt = "";
+            try
+            {
+                {
+                    FtpWebRequest request = (FtpWebRequest)WebRequest.Create("ftp://" + _ftpurl + "//");  //get file list with details from FTP, only 1 IP_URL is needed
+                    request.Method = WebRequestMethods.Ftp.ListDirectory;
+                    request.Credentials = new NetworkCredential(User, Password);
+                    FtpWebResponse response = (FtpWebResponse)request.GetResponse();
+                    Stream responseStream = response.GetResponseStream();
+                    StreamReader reader = new StreamReader(responseStream);
+                    temp_txt = reader.ReadToEnd();
+                    responseStream.Close();
+                    //reader.Close();
+                    request.Abort();
+                }
+                list = temp_txt.Split((new Char[] { '\r', '\n' }), StringSplitOptions.RemoveEmptyEntries).ToList();
+                return list;
+            }
+            catch (Exception)
+            {
+                File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + "    " + _ftpurl + "  " + Environment.NewLine);
+                return list;
+            }
+        }
+        public List<string> GetFileList_Name_Only_option(string URL_Ori, string _ftpurl, string User, string Password, Boolean usebool)         //Get filename only for ETS
+        {
+            //URL_Ori is the top directory and _ftpurl is the folder wish the retrieve file list available in tester
+            string startup_path = Application.StartupPath;
+            List<string> list = new List<string>();
+            string temp_txt = "";
+            try
+            {
+                {
+                    FtpWebRequest request = (FtpWebRequest)WebRequest.Create("ftp://" + _ftpurl + "//");  //get file list with details from FTP, only 1 IP_URL is needed
+                    request.Method = WebRequestMethods.Ftp.ListDirectory;
+                    request.UsePassive = usebool;
+                    request.Credentials = new NetworkCredential(User, Password);
+                    FtpWebResponse response = (FtpWebResponse)request.GetResponse();
+                    Stream responseStream = response.GetResponseStream();
+                    StreamReader reader = new StreamReader(responseStream);
+                    temp_txt = reader.ReadToEnd();
+                    responseStream.Close();
+                    //reader.Close();
+                    request.Abort();
+                }
+                list = temp_txt.Split((new Char[] { '\r', '\n' }), StringSplitOptions.RemoveEmptyEntries).ToList();
+                return list;
+            }
+            catch (Exception)
+            {
+                File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + "    " + _ftpurl + "  " + Environment.NewLine);
+                return list;
+            }
+        }
+
+        public string date_Month_Day_Now()      //get current day and month
+        {
+            string month_in_txt = "0";
+            string day_in_txt = "0";
+            DateTime current_date = DateTime.Now;
+            //current_date = current_date.AddDays(-6);
+            //current_date = current_date.AddMonths(-7);
+            //CultureInfo ci = CultureInfo.InvariantCulture;
+            //DateTime current_date = DateTime.ParseExact("12/31/2020", "MM/dd/yyyy", ci);
+            string year = current_date.Year.ToString();
+            int month = current_date.Month;
+            int day = current_date.Day;
+            if (month < 10)
+            {
+                month_in_txt = "0" + month.ToString();
+            }
+            else
+                month_in_txt = month.ToString();
+
+            if (day < 10)
+            {
+                day_in_txt = "0" + day.ToString();
+            }
+
+            else
+                day_in_txt = day.ToString();
+
+
+            string previous_date = year + month_in_txt + day_in_txt;
+
+            return previous_date;
+        }
+        public string date_Month_Day_Previous()      //get previous day and month(14days before)
+        {
+            string month_in_txt = "0";
+            string day_in_txt = "0";
+            DateTime current_date = DateTime.Now;
+            current_date = current_date.AddDays(-14);
+            //current_date = current_date.AddMonths(-12);
+            //CultureInfo ci = CultureInfo.InvariantCulture;
+            //DateTime current_date = DateTime.ParseExact("09/01/2020", "MM/dd/yyyy", ci);
+            string year = current_date.Year.ToString();
+            int month = current_date.Month;
+            int day = current_date.Day;
+            if (month < 10)
+            {
+                month_in_txt = "0" + month.ToString();
+            }
+            else
+                month_in_txt = month.ToString();
+
+            if (day < 10)
+            {
+                day_in_txt = "0" + day.ToString();
+            }
+
+            else
+                day_in_txt = day.ToString();
+
+
+            string previous_date = year + month_in_txt + day_in_txt;
+
+            return previous_date;
+        }
+        /*----------------------------------------------------------------------------------------------Shibasoku Section-------------------------------------------------------------------------------------------------------*/
+        public string Shiba_Check_File(string filename, int previous, int current_filter, List<string> list_Package_Name)
+        {
+            string previous_date = date_Month_Day_Previous();
+            string current_date = date_Month_Day_Now();
+
+            string[] file_name_Div = filename.Split('_');
+            string[] file_name_Div_further = filename.Split('-');
+
+            bool b = list_Package_Name.Any(file_name_Div_further[0].Contains); //Check if it is product listed within Shiba_Name.xml
+            if (b == true && file_name_Div.Count() == 3)  //Check if it related product and check does the file name can be split into 3 part and further check for the date created
+            {
+                string date_test = Shiba_Parse_File(file_name_Div[2], previous, current_filter);
+                return date_test;
+            }
+            if (b == true && file_name_Div.Count() == 4)  //Check if it related product and check does the file name can be split into 3 part and further check for the date created
+            {
+                string date_test = Shiba_Parse_File(file_name_Div[3], previous, current_filter);
+                return date_test;
+            }
+            if (b == true && file_name_Div.Count() == 5)  //Check if it related product and check does the file name can be split into 3 part and further check for the date created
+            {
+                string date_test = Shiba_Parse_File(file_name_Div[3], previous, current_filter);
+                return date_test;
+            }
+            return null;
+        }
+
+        public string Shiba_Parse_File(string filename, int previous, int current_filter)
+        {
+            int date;
+
+            try
+            {
+                string[] file_name_div = filename.Split('-');
+                if (file_name_div.Count() == 1)
+                {
+                    string file_date = file_name_div[0].Substring(0, 8);
+                    bool A = int.TryParse(file_date, out date);
+                    if (A == true)
+                    {
+                        return file_date;
+                    }
+                }
+                if (file_name_div.Count() >= 3)
+                {
+                    string file_date = file_name_div[2].Substring(0, 8);
+                    bool A = int.TryParse(file_date, out date);
+                    if (A == true)
+                    {
+                        return file_date;
+                    }
+                }
+                return null;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        public void Shiba_Dlog_DownloadFile(string FTP_URL_Ori, string ftpURL, string UserName, string Password, string LocalDirectory, int previous, int current_filter, string dlog_server) //Recursive FTP file download
+        {
+
+
+            List<string> list = GetFileList(FTP_URL_Ori, ftpURL, UserName, Password);
+            List<string> list_File_Name_Only = GetFileList_Name_Only(FTP_URL_Ori, ftpURL, UserName, Password);
+            int date;
+            string budget = null;
+            var MyIni = new IniFile(Application.StartupPath + "\\" + "Tester.ini");
+            XmlDocument doc = new XmlDocument();
+            doc.Load(Application.StartupPath + "\\Shiba_Name.xml");
+            XmlNode node = doc.DocumentElement.SelectSingleNode("/Package_Name");
+            List<string> list_Package_Name = node.InnerText.Split((new Char[] { '\r', '\n' }), StringSplitOptions.RemoveEmptyEntries).ToList(); //Get Shiba_Name.xml all product list
+
+            for (int A = 0; A < list_File_Name_Only.Count; A++)
+            {
+                string file_date = Shiba_Check_File(list_File_Name_Only[A], previous, current_filter, list_Package_Name);// return the date of the file
+
+                string[] file_name_Div = list_File_Name_Only[A].Split('_');
+                string[] file_name_Div_Further = file_name_Div[0].Split('-');
+                //INI section to read related tester information
+                string Product_Name = MyIni.Read(file_name_Div_Further[0], "Product_Name");
+
+
+                //if (!File.Exists(LocalDirectory + "\\" + list_File_Name_Only[A]))
+                if (file_date != null)
+                {
+                    int Month_int;
+                    string Month = file_date.Substring(4, 2);
+                    string Year = file_date.Substring(0, 4);
+                    int.TryParse(Month, out Month_int);
+                    string Month_in_Eng = CultureInfo.CurrentCulture.DateTimeFormat.GetMonthName(Month_int);
+                    Month_in_Eng = Month + "_" + Month_in_Eng.ToUpper();
+                    if (Month_int <= 6)
+                    {
+                        budget = file_date.Substring(2, 2) + "K";
+                    }
+                    if (Month_int >= 7)
+                    {
+                        budget = file_date.Substring(2, 2) + "S";
+                    }
+
+                    bool check = int.TryParse(file_date, out date);
+                    if (check == true)
+                        if (date >= previous && date <= current_filter)
+                            if (!File.Exists(dlog_server + "\\" + file_name_Div_Further[0] + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + list_File_Name_Only[A] + ".7z"))  //check if server file exists
+                            {
+
+                                try
+                                {
+
+                                    FtpWebRequest requestFileDownload = (FtpWebRequest)WebRequest.Create("ftp://" + ftpURL + "//" + list_File_Name_Only[A]);      //use stream method and ftpwebrequest method to download file
+                                    requestFileDownload.Credentials = new NetworkCredential(UserName, Password);
+                                    requestFileDownload.Method = WebRequestMethods.Ftp.DownloadFile;
+                                    FtpWebResponse responseFileDownload = (FtpWebResponse)requestFileDownload.GetResponse();
+                                    Stream responseStream = responseFileDownload.GetResponseStream();
+                                    FileStream writeStream = new FileStream(LocalDirectory + "//" + list_File_Name_Only[A], FileMode.Create);
+                                    int Length = 2048;
+                                    Byte[] buffer = new Byte[Length];
+                                    int bytesRead = responseStream.Read(buffer, 0, Length);
+                                    while (bytesRead > 0)
+                                    {
+                                        writeStream.Write(buffer, 0, bytesRead);
+                                        bytesRead = responseStream.Read(buffer, 0, Length);
+                                    }
+                                    responseStream.Close();
+                                    writeStream.Close();
+                                    //System.Threading.Thread.Sleep(10);
+                                    requestFileDownload = null;
+
+                                    //CreateZipFile(LocalDirectory + "//" + list_File_Name_Only[A], LocalDirectory + "//" + list_File_Name_Only[A]+".7z");
+
+                                    //if (!Directory.Exists(local_path_summary + "\\" + file_name_Div[0] + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng))  //check if local folder exists
+                                    //{
+                                    //    Directory.CreateDirectory(local_path_summary + "\\" + file_name_Div[0] + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng);
+                                    //}
+                                    if (!Directory.Exists(dlog_server + "\\" + file_name_Div_Further[0] + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng))  //check if server folder exists
+                                    {
+                                        Directory.CreateDirectory(dlog_server + "\\" + file_name_Div_Further[0] + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng);
+                                    }
+                                    //if (!File.Exists(local_path_summary + "\\" + file_name_Div[0] + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + list_File_Name_Only[A]))  //check if local file exists
+                                    //{
+                                    //    File.Copy(LocalDirectory + "//" + list_File_Name_Only[A], local_path_summary + "\\" + file_name_Div[0] + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + list_File_Name_Only[A]);
+                                    //}
+
+                                    CreateZipFile(LocalDirectory + "//" + list_File_Name_Only[A], LocalDirectory + "//" + list_File_Name_Only[A] + ".7z");
+                                    File.Move(LocalDirectory + "//" + list_File_Name_Only[A] + ".7z", dlog_server + "\\" + file_name_Div_Further[0] + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + list_File_Name_Only[A] + ".7z");
+
+
+                                    File.Delete(LocalDirectory + "//" + list_File_Name_Only[A]);
+                                    File.Delete(LocalDirectory + "//" + list_File_Name_Only[A] + ".7z");
+                                }
+
+
+                                catch (InvalidOperationException)
+                                {
+                                    string startup_path = Application.StartupPath;
+                                    File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + " InvalidOperationException " + "    " + FTP_URL_Ori + "//" + list_File_Name_Only[A] + "  " + Environment.NewLine);
+                                }
+                                catch (ArgumentException)
+                                {
+                                    string startup_path = Application.StartupPath;
+                                    File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + " ArgumentException " + "    " + FTP_URL_Ori + "//" + list_File_Name_Only[A] + "  " + Environment.NewLine);
+                                }
+                                catch (NotSupportedException)
+                                {
+                                    string startup_path = Application.StartupPath;
+                                    File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + " NotSupportedException " + "    " + FTP_URL_Ori + "//" + list_File_Name_Only[A] + "  " + Environment.NewLine);
+                                }
+                                catch (TimeoutException)
+                                {
+                                    string startup_path = Application.StartupPath;
+                                    File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + " TimeoutException " + "    " + FTP_URL_Ori + "//" + list_File_Name_Only[A] + "  " + Environment.NewLine);
+                                }
+
+                                catch (Exception)
+                                {
+                                    string startup_path = Application.StartupPath;
+                                    File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + " Exception " + "    " + FTP_URL_Ori + "//" + list_File_Name_Only[A] + "  " + Environment.NewLine);
+                                }
+                            }
+                }
+            }
+        }
+
+        public void Shiba_DownloadFile(string FTP_URL_Ori, string ftpURL, string UserName, string Password, string LocalDirectory, int previous, int current_filter, string local_path_summary, string server_path) //Recursive FTP file download
+        {
+
+
+            List<string> list = GetFileList(FTP_URL_Ori, ftpURL, UserName, Password);
+            List<string> list_File_Name_Only = GetFileList_Name_Only(FTP_URL_Ori, ftpURL, UserName, Password);
+            int date;
+            string budget = null;
+            var MyIni = new IniFile(Application.StartupPath + "\\" + "Tester.ini");
+            XmlDocument doc = new XmlDocument();
+            doc.Load(Application.StartupPath + "\\Shiba_Name.xml");
+            XmlNode node = doc.DocumentElement.SelectSingleNode("/Package_Name");
+            List<string> list_Package_Name = node.InnerText.Split((new Char[] { '\r', '\n' }), StringSplitOptions.RemoveEmptyEntries).ToList(); //Get Shiba_Name.xml all product list
+
+            for (int A = 0; A < list_File_Name_Only.Count; A++)
+            {
+                string file_date = Shiba_Check_File(list_File_Name_Only[A], previous, current_filter, list_Package_Name);// return the date of the file
+                //if (!File.Exists(LocalDirectory + "\\" + list_File_Name_Only[A]))
+                if (file_date != null)
+                {
+                    bool check = int.TryParse(file_date, out date);
+                    if (check == true)
+                        if (date >= previous && date <= current_filter)
+                        {
+                            try
+                            {
+                                string[] file_name_Div = list_File_Name_Only[A].Split('_');
+                                string[] file_name_Div_Further = file_name_Div[0].Split('-');
+                                //INI section to read related tester information
+                                string Product_Name = MyIni.Read(file_name_Div_Further[0], "Product_Name");
+                                FtpWebRequest requestFileDownload = (FtpWebRequest)WebRequest.Create("ftp://" + ftpURL + "//" + list_File_Name_Only[A]);      //use stream method and ftpwebrequest method to download file
+                                requestFileDownload.Credentials = new NetworkCredential(UserName, Password);
+                                requestFileDownload.Method = WebRequestMethods.Ftp.DownloadFile;
+                                FtpWebResponse responseFileDownload = (FtpWebResponse)requestFileDownload.GetResponse();
+                                Stream responseStream = responseFileDownload.GetResponseStream();
+                                FileStream writeStream = new FileStream(LocalDirectory + "//" + list_File_Name_Only[A], FileMode.Create);
+                                int Length = 2048;
+                                Byte[] buffer = new Byte[Length];
+                                int bytesRead = responseStream.Read(buffer, 0, Length);
+                                while (bytesRead > 0)
+                                {
+                                    writeStream.Write(buffer, 0, bytesRead);
+                                    bytesRead = responseStream.Read(buffer, 0, Length);
+                                }
+                                responseStream.Close();
+                                writeStream.Close();
+                                //System.Threading.Thread.Sleep(10);
+                                requestFileDownload = null;
+
+
+                                int Month_int;
+                                string Month = file_date.Substring(4, 2);
+                                string Year = file_date.Substring(0, 4);
+                                int.TryParse(Month, out Month_int);
+                                string Month_in_Eng = CultureInfo.CurrentCulture.DateTimeFormat.GetMonthName(Month_int);
+                                Month_in_Eng = Month + "_" + Month_in_Eng.ToUpper();
+                                if (Month_int <= 6)
+                                {
+                                    budget = file_date.Substring(2, 2) + "K";
+                                }
+                                if (Month_int >= 7)
+                                {
+                                    budget = file_date.Substring(2, 2) + "S";
+                                }
+
+                                if (!Directory.Exists(local_path_summary + "\\" + file_name_Div_Further[0] + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng))  //check if local folder exists
+                                {
+                                    Directory.CreateDirectory(local_path_summary + "\\" + file_name_Div_Further[0] + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng);
+                                }
+                                if (!Directory.Exists(server_path + "\\" + file_name_Div_Further[0] + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng))  //check if server folder exists
+                                {
+                                    Directory.CreateDirectory(server_path + "\\" + file_name_Div_Further[0] + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng);
+                                }
+                                if (!File.Exists(local_path_summary + "\\" + file_name_Div_Further[0] + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + list_File_Name_Only[A]))  //check if local file exists
+                                {
+                                    File.Copy(LocalDirectory + "//" + list_File_Name_Only[A], local_path_summary + "\\" + file_name_Div_Further[0] + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + list_File_Name_Only[A]);
+                                }
+                                if (!File.Exists(server_path + "\\" + file_name_Div_Further[0] + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + list_File_Name_Only[A]))  //check if server file exists
+                                {
+                                    File.Move(LocalDirectory + "//" + list_File_Name_Only[A], server_path + "\\" + file_name_Div_Further[0] + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + list_File_Name_Only[A]);
+                                }
+                                else
+                                    File.Delete(LocalDirectory + "//" + list_File_Name_Only[A]);
+                            }
+
+                            catch (InvalidOperationException)
+                            {
+                                string startup_path = Application.StartupPath;
+                                File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + " InvalidOperationException " + "    " + FTP_URL_Ori + "//" + list_File_Name_Only[A] + "  " + Environment.NewLine);
+                            }
+                            catch (ArgumentException)
+                            {
+                                string startup_path = Application.StartupPath;
+                                File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + " ArgumentException " + "    " + FTP_URL_Ori + "//" + list_File_Name_Only[A] + "  " + Environment.NewLine);
+                            }
+                            catch (NotSupportedException)
+                            {
+                                string startup_path = Application.StartupPath;
+                                File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + " NotSupportedException " + "    " + FTP_URL_Ori + "//" + list_File_Name_Only[A] + "  " + Environment.NewLine);
+                            }
+                            catch (TimeoutException)
+                            {
+                                string startup_path = Application.StartupPath;
+                                File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + " TimeoutException " + "    " + FTP_URL_Ori + "//" + list_File_Name_Only[A] + "  " + Environment.NewLine);
+                            }
+
+                            catch (Exception)
+                            {
+                                string startup_path = Application.StartupPath;
+                                File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + " Exception " + "    " + FTP_URL_Ori + "//" + list_File_Name_Only[A] + "  " + Environment.NewLine);
+                            }
+                        }
+                }
+            }
+        }
+        /*----------------------------------------------------------------------------------------------ETS_Section-------------------------------------------------------------------------------------------------------*/
+        public void DownloadFile(string FTP_Folder, string Local_Folder, string username, string password, List<string> filename_list, string Datalog)   //download file for the first layer
+        {
+            if (Datalog == "Y")
+                for (int A = 0; A < filename_list.Count; A++)
+                {
+                    if (!File.Exists(Local_Folder + "/" + filename_list[A]))
+                    {
+                        try
+                        {
+                            FtpWebRequest requestFileDownload = (FtpWebRequest)WebRequest.Create(FTP_Folder + "//" + filename_list[A]);
+                            requestFileDownload.Credentials = new NetworkCredential(username, password);
+                            requestFileDownload.Method = WebRequestMethods.Ftp.DownloadFile;
+                            FtpWebResponse responseFileDownload = (FtpWebResponse)requestFileDownload.GetResponse();
+                            //requestFileDownload.Timeout = 60000;   //1minutes timeout
+                            //requestFileDownload.KeepAlive = false;
+                            Stream responseStream = responseFileDownload.GetResponseStream();
+                            FileStream writeStream = new FileStream(Local_Folder + "/" + filename_list[A], FileMode.Create);
+                            int Length = 2048;
+                            Byte[] buffer = new Byte[Length];
+                            int bytesRead = responseStream.Read(buffer, 0, Length);
+                            while (bytesRead > 0)
+                            {
+                                writeStream.Write(buffer, 0, bytesRead);
+                                bytesRead = responseStream.Read(buffer, 0, Length);
+                            }
+                            responseStream.Close();
+                            writeStream.Close();
+                            //System.Threading.Thread.Sleep(10);
+                            requestFileDownload.Abort();
+                        }
+
+                        catch (InvalidOperationException)
+                        {
+                            string startup_path = Application.StartupPath;
+                            File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + " InvalidOperationException " + "    " + FTP_Folder + "//" + filename_list[A] + "  " + Environment.NewLine);
+                        }
+                        catch (ArgumentException)
+                        {
+                            string startup_path = Application.StartupPath;
+                            File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + " ArgumentException " + "    " + FTP_Folder + "//" + filename_list[A] + "  " + Environment.NewLine);
+                        }
+                        catch (NotSupportedException)
+                        {
+                            string startup_path = Application.StartupPath;
+                            File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + " NotSupportedException " + "    " + FTP_Folder + "//" + filename_list[A] + "  " + Environment.NewLine);
+                        }
+                        catch (TimeoutException)
+                        {
+                            string startup_path = Application.StartupPath;
+                            File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + " TimeoutException " + "    " + FTP_Folder + "//" + filename_list[A] + "  " + Environment.NewLine);
+                        }
+
+                        catch (Exception)
+                        {
+                            string startup_path = Application.StartupPath;
+                            File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + " Exception " + "    " + FTP_Folder + "//" + filename_list[A] + "  " + Environment.NewLine);
+                        }
+                    }
+                }
+            else if (Datalog == "N")
+            {
+                for (int A = 0; A < filename_list.Count; A++)
+                {
+                    string ext = Path.GetExtension(filename_list[A]);
+                    if (ext == ".txt" || ext == ".summary")
+                        if (!File.Exists(Local_Folder + "/" + filename_list[A]))
+                        {
+                            try
+                            {
+                                FtpWebRequest requestFileDownload = (FtpWebRequest)WebRequest.Create(FTP_Folder + "//" + filename_list[A]);
+                                requestFileDownload.Credentials = new NetworkCredential(username, password);
+                                requestFileDownload.Method = WebRequestMethods.Ftp.DownloadFile;
+                                FtpWebResponse responseFileDownload = (FtpWebResponse)requestFileDownload.GetResponse();
+                                //requestFileDownload.Timeout = 60000;   //1minutes timeout
+                                //requestFileDownload.KeepAlive = false;
+                                Stream responseStream = responseFileDownload.GetResponseStream();
+                                FileStream writeStream = new FileStream(Local_Folder + "/" + filename_list[A], FileMode.Create);
+                                int Length = 2048;
+                                Byte[] buffer = new Byte[Length];
+                                int bytesRead = responseStream.Read(buffer, 0, Length);
+                                while (bytesRead > 0)
+                                {
+                                    writeStream.Write(buffer, 0, bytesRead);
+                                    bytesRead = responseStream.Read(buffer, 0, Length);
+                                }
+                                responseStream.Close();
+                                writeStream.Close();
+                                //System.Threading.Thread.Sleep(10);
+                                requestFileDownload.Abort();
+                            }
+
+                            catch (InvalidOperationException)
+                            {
+                                string startup_path = Application.StartupPath;
+                                File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + " InvalidOperationException " + "    " + FTP_Folder + "//" + filename_list[A] + "  " + Environment.NewLine);
+                            }
+                            catch (ArgumentException)
+                            {
+                                string startup_path = Application.StartupPath;
+                                File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + " ArgumentException " + "    " + FTP_Folder + "//" + filename_list[A] + "  " + Environment.NewLine);
+                            }
+                            catch (NotSupportedException)
+                            {
+                                string startup_path = Application.StartupPath;
+                                File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + " NotSupportedException " + "    " + FTP_Folder + "//" + filename_list[A] + "  " + Environment.NewLine);
+                            }
+                            catch (TimeoutException)
+                            {
+                                string startup_path = Application.StartupPath;
+                                File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + " TimeoutException " + "    " + FTP_Folder + "//" + filename_list[A] + "  " + Environment.NewLine);
+                            }
+
+                            catch (Exception)
+                            {
+                                string startup_path = Application.StartupPath;
+                                File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + " Exception " + "    " + FTP_Folder + "//" + filename_list[A] + "  " + Environment.NewLine);
+                            }
+                        }
+                }
+            }
+        }
+        public string ParseFile_Dir(string raw_dir_list, int A)  //For ETS only,Parse raw string of Dir,0 return date, 1 return time modified, 2 is Dir/Size? , 3 return FileName(not recommended)
+        {
+            string[] split = System.Text.RegularExpressions.Regex.Split(raw_dir_list, @"\s{1,}");  // Parse File got error, file name got space will return error
+            string File_Type = split[A];
+            return File_Type;
+        }
+        public void DownloadFolder(string FTP_URL_Ori, string ftpURL, string UserName, string Password, string RawData_FolderName, string LocalDirectory) //Recursive FTP file download
+        {
+            if (!Directory.Exists(LocalDirectory + "/" + RawData_FolderName))  //check if local folder for Raw Data exists
+                Directory.CreateDirectory(LocalDirectory + "/" + RawData_FolderName);
+            {
+                List<string> list = GetFileList(FTP_URL_Ori, ftpURL + "//" + RawData_FolderName, UserName, Password);
+                ftpURL = ftpURL + "//" + RawData_FolderName;
+                LocalDirectory = LocalDirectory + "\\" + RawData_FolderName;    //update current file, dir, local path info
+                int list_Count = list.Count();
+                for (int A = 0; A < list_Count; A++)        //looping all the file list in the Raw Data Folder
+                {
+                    List<string> list_File_Name_Only = GetFileList_Name_Only(FTP_URL_Ori, ftpURL, UserName, Password);
+                    string FileName = list_File_Name_Only[A];
+                    string File_Type = ParseFile_Dir(list[A], 2);
+                    if (File_Type != "<DIR>")
+                    {
+                        //char temp_filename_inchar = Convert.ToChar(FileName);
+                        string[] temp_filename = FileName.Split('.');
+                        string temp_file_compare = temp_filename.Last();
+                        if (temp_file_compare == "summary")
+                        {
+                            try
+                            {
+                                if (!File.Exists(LocalDirectory + "/" + FileName))
+                                {
+                                    FtpWebRequest requestFileDownload = (FtpWebRequest)WebRequest.Create("ftp://" + ftpURL + "//" + FileName);      //use stream method and ftpwebrequest method to download file
+                                    requestFileDownload.Credentials = new NetworkCredential(UserName, Password);
+                                    requestFileDownload.Method = WebRequestMethods.Ftp.DownloadFile;
+                                    FtpWebResponse responseFileDownload = (FtpWebResponse)requestFileDownload.GetResponse();
+                                    //requestFileDownload.Timeout = 60000;   //1minutes timeout
+                                    //requestFileDownload.KeepAlive = false;
+                                    Stream responseStream = responseFileDownload.GetResponseStream();
+                                    FileStream writeStream = new FileStream(LocalDirectory + "/" + FileName, FileMode.Create);
+                                    int Length = 2048;
+                                    Byte[] buffer = new Byte[Length];
+                                    int bytesRead = responseStream.Read(buffer, 0, Length);
+                                    while (bytesRead > 0)
+                                    {
+                                        writeStream.Write(buffer, 0, bytesRead);
+                                        bytesRead = responseStream.Read(buffer, 0, Length);
+                                    }
+                                    responseStream.Close();
+                                    writeStream.Close();
+                                    //System.Threading.Thread.Sleep(10);
+                                    requestFileDownload.Abort();
+                                    ETS_summary(LocalDirectory, FileName, UserName, Password, "ftp://" + ftpURL, LocalDirectory, list_File_Name_Only, RawData_FolderName);
+                                    return;
+                                }
+                            }
+                            catch (InvalidOperationException)
+                            {
+                                string startup_path = Application.StartupPath;
+                                File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + "InvalidOperationException" + "    " + ftpURL + "//" + FileName + "  " + Environment.NewLine);
+                            }
+                            catch (NotSupportedException)
+                            {
+                                string startup_path = Application.StartupPath;
+                                File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + "NotSupportedException" + "    " + ftpURL + "//" + FileName + "  " + Environment.NewLine);
+                            }
+                            catch (ArgumentException)
+                            {
+                                string startup_path = Application.StartupPath;
+                                File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + "ArgumentException" + "    " + ftpURL + "//" + FileName + "  " + Environment.NewLine);
+                            }
+
+                            catch (TimeoutException)
+                            {
+                                string startup_path = Application.StartupPath;
+                                File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + "TimeoutException" + "    " + ftpURL + "//" + FileName + "  " + Environment.NewLine);
+                            }
+
+                            catch (Exception)
+                            {
+                                string startup_path = Application.StartupPath;
+                                File.AppendAllText(startup_path + "//Special_Case.txt", "File not accessible or not found " + DateTime.Now.ToString() + "Exception" + "    " + ftpURL + "//" + FileName + "  " + Environment.NewLine);
+                            }
+                        }
+
+                    }
+                    else
+                    {
+                        // DownloadFolder(ftpURL, UserName, Password, list_File_Name_Only[A], LocalDirectory);        //Recursively Call Function to cont download file by looping dynamically
+                    }
+
+                }
+            }
+        }
+
+        public string ParseFileExt(string raw_dir_list)    //0 return filename without ext, 1 return ext only
+        {
+            string[] file_ext = raw_dir_list.Split('.');
+            MessageBox.Show(file_ext[1]);
+            return file_ext[1];
+        }
+
+
+        public void ETS_summary(string local_file_path, string file_name, string username, string password, string ftpurl_folder, string local_directory, List<string> filename_list, string FTP_folder_Name)     //remove file from ETS to correcponding product
+        {
+            string path = Application.StartupPath.ToString();
+
+            var MyIni = new IniFile(path + "\\" + "Tester.ini");            //INI section to read related tester information
+            string Server_Path = MyIni.Read("Server_Path", "Info");
+            string Final_Path = MyIni.Read("Final_Path", "Info");
+            string Dlog_Server_Path = MyIni.Read("Dlog_Server_Path", "Info");
+            string Datalog = MyIni.Read("Datalog", "Info");
+            string Product_Name = "";
+            string budget = null;
+            string folder_date = Path.GetFileName(local_file_path);
+            int Month_int = new int();
+            string Month = folder_date.Substring(4, 2);
+            string Year = folder_date.Substring(0, 4);
+            int.TryParse(Month, out Month_int);
+            string Month_in_Eng = CultureInfo.CurrentCulture.DateTimeFormat.GetMonthName(Month_int);
+            Month_in_Eng = Month + "_" + Month_in_Eng.ToUpper();
+            if (Month_int <= 6)
+            {
+                budget = folder_date.Substring(2, 2) + "K";
+            }
+            if (Month_int >= 7)
+            {
+                budget = folder_date.Substring(2, 2) + "S";
+            }
+
+            XmlDocument doc = new XmlDocument();
+            doc.Load(path + "\\ETS_Device_Name.xml");
+            XmlNode node = doc.DocumentElement.SelectSingleNode("/Package_Name");
+            List<string> list_Package_Name = node.InnerText.Split((new Char[] { '\r', '\n' }), StringSplitOptions.RemoveEmptyEntries).ToList();
+
+            string[] alltext = File.ReadAllLines(local_file_path + "\\" + file_name);
+            string segre_text = alltext[3];
+            string[] line_of_package = Regex.Split(segre_text, @"\s{1,}");
+            string[] split_package_line = line_of_package[3].Split('_');
+            string package = split_package_line[0];
+            package = package.ToUpper();
+            try
+            {
+                Product_Name = MyIni.Read(package, "Product_Name");
+            }
+            catch (Exception)
+            {
+
+            }
+
+            bool b = list_Package_Name.Any(package.Contains);
+
+            if (b == true)
+                if (!File.Exists(Server_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + FTP_folder_Name + "\\" + file_name))
+                {
+                    //Download All file regardless file type
+                    DownloadFile(ftpurl_folder, local_file_path, username, password, filename_list, Datalog);
+
+                    string file_path2 = Path.GetFileName(local_file_path);
+
+
+                    if (!Directory.Exists(Final_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_path2))  //check if local folder exists
+                    {
+                        Directory.CreateDirectory(Final_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_path2);
+                    }
+                    if (!Directory.Exists(Server_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_path2))  //check if local folder exists
+                    {
+                        Directory.CreateDirectory(Server_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_path2);
+                    }
+                    string[] File_ETS_Looping = Directory.GetFiles(local_file_path);
+
+                    for (int Z = 0; Z < File_ETS_Looping.Count(); Z++)
+                    {
+                        string[] temp_filename = File_ETS_Looping[Z].Split('.');
+                        string temp_file_compare = temp_filename.Last();
+                        if (temp_file_compare == "summary" || temp_file_compare == "txt")
+                        {
+                            if (!File.Exists(Final_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_path2 + "\\" + Path.GetFileName(File_ETS_Looping[Z])))  //check if local folder exists           
+                            {
+                                File.Copy(File_ETS_Looping[Z], Final_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_path2 + "\\" + Path.GetFileName(File_ETS_Looping[Z]));
+                            }
+
+
+                            if (!File.Exists(Server_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_path2 + "\\" + Path.GetFileName(File_ETS_Looping[Z])))  //check if local folder exists     
+                            { File.Copy(File_ETS_Looping[Z], Server_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_path2 + "\\" + Path.GetFileName(File_ETS_Looping[Z])); }
+
+
+                            else
+                            {
+                                Directory.Delete(local_file_path, true);
+                                //return;
+                            }
+                        }
+                    }
+                    if (Datalog == "Y")
+                    {
+                        CreateZipFolder(local_file_path, Dlog_Server_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_path2);
+                        Directory.Delete(local_file_path, true);
+                    }
+                }
+                else
+                {
+                    Directory.Delete(local_file_path, true);
+                }
+        }
+
+        public void ETS_read_package(string local_path, string Final_Path)     //Check file type, go to ETS summary if it is .summary
+        {
+
+            string[] folder_list = Directory.GetDirectories(local_path);
+            for (int A = 0; A < folder_list.Length; A++)
+            {
+                bool flag = false;
+                string[] file_list = Directory.GetFiles(folder_list[A]);
+                for (int Z = 0; Z < file_list.Length; Z++)
+                {
+
+                    string type = System.IO.Path.GetExtension(file_list[Z]);
+                    if (type == ".summary")
+                    {
+                        flag = true;
+                        //ETS_summary(folder_list[A], file_list[Z], Final_Path);
+                        break;
+                    }
+                    if (flag == true)
+                        break;
+                }
+            }
+        }
+
+        /*----------------------------------------------------------------------------------------------INI_Checking_Section-------------------------------------------------------------------------------------------------------*/
+        public void check_INI()      //check INI content to avoid corruption
+        {
+            string path = Application.StartupPath.ToString();
+            var MyIni = new IniFile(path + "\\" + "Tester.ini");            //INI section to read related tester information
+            string test1 = MyIni.Read("Tester_Count", "Info");
+            string test2 = MyIni.Read("Tester_Name", "Info");
+            if (test1 == "" || test2 == "")
+            {
+                MessageBox.Show("Please check CONFIG File");
+                Application.Exit();
+            }
+
+            string tester_ini_naming = MyIni.Read("Tester_Name", "Info");
+            string[] tester_num = tester_ini_naming.Split('/');
+            int tester_count = Convert.ToInt32(test1);
+            for (int A = 0; A < tester_count; A++)
+            {
+                //string info1 = MyIni.Read("Local_File_Path", tester_num[A]);
+                string info2 = MyIni.Read("FTP_URL", tester_num[A]);
+                string info3 = MyIni.Read("FTP_URL_Ori ", tester_num[A]);
+                string info4 = MyIni.Read("User ", tester_num[A]);
+                string info5 = MyIni.Read("Password", tester_num[A]);
+                if (info2 == "" || info3 == "" || info4 == "" || info5 == "")
+                {
+                    MessageBox.Show("Please check CONFIG File!");
+                    Application.Exit();
+                }
+            }
+        }
+
+        /*----------------------------------------------------------------------------------------------Start_Download_Button-------------------------------------------------------------------------------------------------------*/
+        private void longDownload()
+        {
+            button4.BackColor = Color.MistyRose;
+            button4.Text = "Downloading";
+            button4.Enabled = false;
+            string previous_date_filter = date_Month_Day_Previous();
+            string current_date_filter = date_Month_Day_Now();
+            int date_filter = Convert.ToInt32(previous_date_filter);
+            int current_filter = Convert.ToInt32(current_date_filter);
+            string path = Application.StartupPath.ToString();
+            var MyIni = new IniFile(path + "\\" + "Tester.ini");            //INI section to read related tester information
+            string Macro_Path = MyIni.Read("Macro_Path", "Info");
+            string Macro_Name = MyIni.Read("Macro_Name", "Info");
+            string Server_Path = MyIni.Read("Server_Path", "Info");
+            string tester_ini_count = MyIni.Read("Tester_Count", "Info");
+            int tester_ini_count_int = Convert.ToInt32(tester_ini_count);
+            string Final_Path = MyIni.Read("Final_Path", "Info");
+            string tester_ini_naming = MyIni.Read("Tester_Name", "Info");
+            string server_Dlog = MyIni.Read("Dlog_Server_Path", "Info");
+
+            string[] tester_num = tester_ini_naming.Split('/');
+
+            for (int N_tester = 0; N_tester < tester_ini_count_int; N_tester++)
+            {               //Number of tester
+                            //string local_Tester_Path = MyIni.Read("Local_File_Path", tester_num[N_tester]);
+                            //textBox2.Text = "Downloading " + tester_num[N_tester];
+                try
+                {
+                    string Local_Download_To_Path = MyIni.Read("Local_File_Path", "Info");
+                    string FTP_URL_Tester_Path = MyIni.Read("FTP_URL", tester_num[N_tester]);
+                    string FTP_URL_Ori = MyIni.Read("FTP_URL_Ori", tester_num[N_tester]);
+                    string User_ini = MyIni.Read("User", tester_num[N_tester]);
+                    string password_ini = MyIni.Read("Password", tester_num[N_tester]);
+                    string tester_type = MyIni.Read("Tester_Type", tester_num[N_tester]);
+
+                    //Ping pingFTP = new Ping();
+                    //PingReply PR = pingFTP.Send(FTP_URL_Ori);
+                    //if (PR.Status.ToString().Equals("Success"))                 
+                    List<string> list = GetFileList(FTP_URL_Ori, FTP_URL_Tester_Path, User_ini, password_ini);
+                    List<string> list_File_Name_Only = GetFileList_Name_Only(FTP_URL_Ori, FTP_URL_Tester_Path, User_ini, password_ini);
+                    File.AppendAllText(path + "//download_LogFile.txt", "Start Download " + DateTime.Now.ToString() + "    " + FTP_URL_Tester_Path + "  " + Environment.NewLine);
+                    if (Directory.Exists(Local_Download_To_Path) == false) { Directory.CreateDirectory(Local_Download_To_Path); }
+                    if (tester_type == "ETS")
+                    {
+                        for (int A = 0; A < list.Count; A++)
+                        {
+
+                            string TYPE = ParseFile_Dir(list[A], 2);
+                            string ETS_Raw_Folder_Name_Only = list_File_Name_Only[A];
+                            if (ETS_Raw_Folder_Name_Only.Length >= 8)//Check If file name more than 8 char
+                            {
+                                string temp_folder_date = ETS_Raw_Folder_Name_Only.Substring(0, 8);//Get first 8 char
+                                int x;
+                                if (int.TryParse(temp_folder_date, out x))//try if first 8 char can be converted to INT
+                                {
+                                    if (x >= date_filter && x <= current_filter)          //Folder_Date_Filter Comparison(14days)
+                                    {
+                                        if (TYPE == "<DIR>")      //Go to recursive download function
+                                        {
+                                            DownloadFolder(FTP_URL_Ori, FTP_URL_Tester_Path, User_ini, password_ini, ETS_Raw_Folder_Name_Only, Local_Download_To_Path);
+                                        }
+                                        else if (TYPE == "0")    //skip download 0KB  file at first layer
+                                        {
+                                        }
+                                        else
+                                        {
+                                            //DownloadFile(FTP_URL_Tester_Path, User_ini, password_ini, FileName, _LocalDirectory, TYPE);   //Direct download file
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    //ETS_read_package(local_Tester_Path, Final_Path);
+                    //move folder add here
+                    if (tester_type == "FUSION")
+                    {
+                        fusion_Download(date_filter, current_filter, User_ini, password_ini, FTP_URL_Tester_Path, FTP_URL_Ori);
+                        string Second_layer_dir = MyIni.Read("Second_layer_dir", tester_num[N_tester]);
+                        string Datalog_DL = MyIni.Read("Datalog","Info");
+                        if( Datalog_DL == "Y")
+                        fusion_std_Download(date_filter, current_filter, User_ini, password_ini, Second_layer_dir, FTP_URL_Ori);
+                    }
+
+                    if (tester_type == "T3347" || tester_type == "T2K")
+                    {
+                        string Second_layer_dir = MyIni.Read("Second_layer_dir", tester_num[N_tester]);
+                        string File_download = MyIni.Read("File_download", tester_num[N_tester]);
+                        string Folder_download = MyIni.Read("Folder_download", tester_num[N_tester]);
+                        string Tester_Name = tester_num[N_tester];
+                        if (tester_num[N_tester].Contains("RET2"))      //RET2 transfer mode active
+                        {
+                            Boolean UsePassive = false;
+                            t3347_t2k_Download_1stlayer(date_filter, current_filter, User_ini, password_ini, FTP_URL_Tester_Path, FTP_URL_Ori, Second_layer_dir, File_download, Folder_download, Tester_Name, tester_type, UsePassive);
+                        }
+                        else
+                        {
+                            Boolean UsePassive = true;
+                            t3347_t2k_Download_1stlayer(date_filter, current_filter, User_ini, password_ini, FTP_URL_Tester_Path, FTP_URL_Ori, Second_layer_dir, File_download, Folder_download, Tester_Name, tester_type, UsePassive);
+                        }
+                        //t3347_t2k_Download_1stlayer(date_filter, current_filter, User_ini, password_ini, FTP_URL_Tester_Path, FTP_URL_Ori, Second_layer_dir, File_download, Folder_download, Tester_Name, tester_type);
+                    }
+
+                    if (tester_type == "LTX")
+                    {
+                        LTX_Download(date_filter, current_filter, User_ini, password_ini, FTP_URL_Tester_Path, FTP_URL_Ori, tester_num[N_tester]);
+                    }
+
+
+                    if (tester_type == "LTX_Histo")
+                    {
+                        //string Datalog_DL = MyIni.Read("Datalog", "Info");
+                        //if (Datalog_DL == "Y")
+                            LTX_Download_Histo(date_filter, current_filter, User_ini, password_ini, FTP_URL_Tester_Path, FTP_URL_Ori, tester_num[N_tester]);
+                    }
+                    if (tester_type == "Shiba")
+                    {
+                        Shiba_DownloadFile(FTP_URL_Ori, FTP_URL_Tester_Path, User_ini, password_ini, Local_Download_To_Path, date_filter, current_filter, Final_Path, Server_Path);
+                        string Dlog = MyIni.Read("Second_layer_dir", tester_num[N_tester]);
+                        string Datalog_DL = MyIni.Read("Datalog", "Info");
+                        if (Datalog_DL == "Y")
+                            Shiba_Dlog_DownloadFile(FTP_URL_Ori, Dlog, User_ini, password_ini, Local_Download_To_Path, date_filter, current_filter, server_Dlog);
+                    }
+
+                    //MessageBox.Show("Done Download Raw Data from June Onward" + DateTime.Now.ToString());   //not recommend to use as it will wait till finish before proceed to other tester
+                    //double cal = GetFileSizeLocal(local_Tester_Path);
+                    //string previous_mem = MyIni.Read("MEM", tester_num[N_tester]);
+                    //double previous_mem_in_double = Convert.ToDouble(previous_mem);
+                    //MyIni.Write("MEM", cal.ToString(), tester_num[N_tester]);
+                    //cal = cal - previous_mem_in_double;
+                    //cal = Math.Round(cal, 5);
+                    File.AppendAllText(path + "//download_LogFile.txt", "Finish Download " + DateTime.Now.ToString() + "    " + FTP_URL_Tester_Path + "  " + Environment.NewLine);
+                    MyIni.Write("Latest_Download_Date", DateTime.Now.ToString(), tester_num[N_tester]);
+
+
+                    //else
+                    //{
+                    //    File.AppendAllText(path + "//date.txt", DateTime.Now.ToString() + "    " + FTP_URL_Ori + "  " + Environment.NewLine);
+                    //}
+
+                    // Delete all residue file/folder
+                    DirectoryInfo dir = new DirectoryInfo(Local_Download_To_Path);
+
+                    foreach (FileInfo files in dir.GetFiles()) { files.Delete(); }
+                    foreach (DirectoryInfo dirs in dir.GetDirectories()) { dirs.Delete(true); }
+                }
+
+                catch (Exception)
+                {
+
+                }
+
+
+
+                //XML system to remove non-LMT porduct
+            }
+            XML_remove_Non_LMT(Final_Path, path);//remove local part unwanted product -> link to Package_Name.xml
+            XML_remove_Non_LMT(Server_Path, path);//remove server part unwanted product -> link to Package_Name.xml
+            XML_remove_Non_LMT(server_Dlog, path);
+            button4.Text = "Manual Download";
+            button4.BackColor = Color.LightGreen;
+            button4.Enabled = true;
+            //textBox2.Clear();
+
+        }
+        private void button4_Click(object sender, EventArgs e)      //Start the Auto/Manual download process
+        {
+            longDownload();
+        }
+        /*----------------------------------------------------------------------------------------------XML_Remove_Directory_After_Download-------------------------------------------------------------------------------------------------------*/
+        public void XML_remove_Non_LMT(string path_inherit, string path)
+        {
+            try
+            {
+                string[] dir_full_path = Directory.GetDirectories(path_inherit, "*", SearchOption.TopDirectoryOnly);          //Check if it is LMT product
+                string[] dir_name_only = Directory.GetDirectories(path_inherit, "*", SearchOption.TopDirectoryOnly)
+                                         .Select(Path.GetFileName)
+                                         .ToArray();
+
+                XmlDocument doc = new XmlDocument();
+                doc.Load(path + "\\Package_Name.xml");
+                XmlNode node = doc.DocumentElement.SelectSingleNode("/Package_Name");
+                List<string> list_Package_Name = node.InnerText.Split((new Char[] { '\r', '\n' }), StringSplitOptions.RemoveEmptyEntries).ToList();
+
+                for (int Z = 0; Z < dir_name_only.Length; Z++)
+                {
+                    if (!list_Package_Name.Contains(dir_name_only[Z]))
+                    {
+                        DirectoryInfo path_product = new DirectoryInfo(dir_full_path[Z]);
+                        path_product.Delete(true);
+                    }
+                }
+            }
+            catch (Exception)
+            {
+
+            }
+        }
+        /*----------------------------------------------------------------------------------------------Unused_Code(Future/Backup)-------------------------------------------------------------------------------------------------------*/
+
+        private double GetFileSizeLocal(string local_tester_path)       //Calculation got problems
+        {
+            double cal = new double();
+
+            cal = GetFolder_list_Local(local_tester_path);
+
+            return cal;
+        }
+
+
+        private void MyTimer_FTP_Download(object sender, EventArgs e)  //Timer execute AutoDownload Function
+        {
+            button4.PerformClick();
+        }
+
+        private void MyTimer_FTP_Ping(object sender, EventArgs e)       //Timer auto check FTP connection
+        {
+            PingFTP();
+        }
+        private double GetFile_list_Local(string local_tester_path)   //calculate local path total file size and return in MB
+        {
+            long length = 0;
+            double temp = 0;
+            double result = 0;
+            string[] file_list = Directory.GetFiles(local_tester_path);
+            foreach (string name in file_list)
+            {
+                length = new System.IO.FileInfo(name).Length;
+                temp = Convert.ToDouble(length);
+                temp = temp / 1024 / 1024;
+                result += temp;
+            }
+            return result;
+        }
+
+        private double GetFolder_list_Local(string local_tester_path)
+        {
+            try
+            {
+                double size = new double();
+                size = 0;
+                string[] file_list = Directory.GetDirectories(local_tester_path);
+                foreach (string name in file_list)
+                {
+                    FileAttributes attr = File.GetAttributes(name);
+                    if (attr.HasFlag(FileAttributes.Directory))
+                        size += GetFile_list_Local(name);
+                }
+                return size;
+            }
+            catch (IOException)
+            {
+                return 0;
+            }
+
+        }
+        /*----------------------------------------------------------------------------------------------Fusion-------------------------------------------------------------------------------------------------------*/
+        public string Fusion_Parse_File_Date(string File_Name_Only)//Fusion Get date from file
+        {
+            long s = new long();
+            try
+            {
+                string[] date = File_Name_Only.Split('_');
+                if (date.Length > 6)
+                    if (date[6] != "")
+                    {
+
+                        {
+                            string[] dateA = date[6].Split('.');
+                            if (dateA[0] != "")
+                            {
+                                bool result = Int64.TryParse(dateA[0], out s);
+                                if (result == true)
+                                {
+                                    string first_8_date = dateA[0].Substring(0, 8);
+                                    return first_8_date;
+                                }
+                                else
+                                    return "";
+                            }
+                            else
+                                return "";
+                        }
+                    }
+            }
+            catch (Exception)
+            {
+                //throw ex;
+            }
+            return "";
+        }
+        public void fusion_summary(string file_path, string Final_Path)//Read Summary file from Fusion
+        {
+            string path = Application.StartupPath.ToString();
+            var MyIni = new IniFile(path + "\\" + "Tester.ini");            //INI section to read related tester information
+            string Server_Path = MyIni.Read("Server_Path", "Info");
+            string budget = null;
+            string folder_date = Path.GetFileName(file_path);
+            string[] folder_date_parse = folder_date.Split('_');
+            int Month_int = new int();
+            string Month = folder_date_parse[6].Substring(4, 2);
+            // string Year = folder_date_parse[6].Substring(0, 4);
+            int.TryParse(Month, out Month_int);
+            string Month_in_Eng = CultureInfo.CurrentCulture.DateTimeFormat.GetMonthName(Month_int);
+            Month_in_Eng = Month + "_" + Month_in_Eng.ToUpper();
+
+            if (Month_int <= 6)
+            {
+                budget = folder_date_parse[6].Substring(2, 2) + "K";
+            }
+            if (Month_int >= 7)
+            {
+                budget = folder_date_parse[6].Substring(2, 2) + "S";
+            }
+
+            try
+            {
+                string[] alltext = File.ReadAllLines(file_path);
+                string logContent = File.ReadAllText(file_path);
+                logContent = Regex.Replace(logContent, "(?<!\r)\n", "\r\n");
+                File.WriteAllText(file_path, logContent);
+                if (alltext != null)
+                {
+                    string Product_Name = "";
+                    string segre_text = alltext[7];
+                    string[] line_of_package = Regex.Split(segre_text, @"\s{1,}");
+                    string[] split_package_line = line_of_package[2].Split('_');
+                    string package = split_package_line[0];
+                    package = package.ToUpper();
+                    string file_name = Path.GetFileName(file_path);
+                    try
+                    {
+                        Product_Name = MyIni.Read(package, "Product_Name");
+                    }
+                    catch (Exception)
+                    {
+
+                    }
+                    if (package == "")
+                    {
+                        File.Delete(file_path);
+                    }
+                    else
+                    {
+                        if (!Directory.Exists(Final_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng))  //check if local folder exists
+                        {
+                            Directory.CreateDirectory(Final_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng);
+                        }
+                        if (!Directory.Exists(Server_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng))  //check if local folder exists
+                        {
+                            Directory.CreateDirectory(Server_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng);
+                        }
+                        if (!File.Exists(Final_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name))  //check if local folder exists
+                        {
+                            File.Copy(file_path, Final_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name);
+                        }
+                        if (!File.Exists(Server_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name))  //check if local folder exists
+                        {
+                            File.Move(file_path, Server_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name);
+                        }
+                        else
+                            File.Delete(file_path);
+                    }
+                }
+                else
+                    File.Delete(file_path);
+            }
+            catch (Exception)
+            {
+                File.Delete(file_path);
+            }
+        }
+        public void fusion_txt(string file_path, string Final_Path)//Read Fusion Text File
+        {
+            string path = Application.StartupPath.ToString();
+            var MyIni = new IniFile(path + "\\" + "Tester.ini");            //INI section to read related tester information
+            string Server_Path = MyIni.Read("Server_Path", "Info");
+            string budget = null;
+            string folder_date = Path.GetFileName(file_path);
+            string[] folder_date_parse = folder_date.Split('_');
+            int Month_int = new int();
+            string Month = folder_date_parse[6].Substring(4, 2);
+            //string Year = folder_date_parse[6].Substring(0, 4);
+            int.TryParse(Month, out Month_int);
+            string Month_in_Eng = CultureInfo.CurrentCulture.DateTimeFormat.GetMonthName(Month_int);
+            Month_in_Eng = Month + "_" + Month_in_Eng.ToUpper();
+
+            if (Month_int <= 6)
+            {
+                budget = folder_date_parse[6].Substring(2, 2) + "K";
+            }
+            if (Month_int >= 7 && Month_int <= 12)
+            {
+                budget = folder_date_parse[6].Substring(2, 2) + "S";
+            }
+
+            try
+            {
+                string Product_Name = "";
+                string[] alltext = File.ReadAllLines(file_path);
+                string logContent = File.ReadAllText(file_path);
+                logContent = Regex.Replace(logContent, "(?<!\r)\n", "\r\n");
+                File.WriteAllText(file_path, logContent);
+                if (alltext != null)
+                {
+                    string segre_text = alltext[7];
+                    string[] line_of_package = Regex.Split(segre_text, @"\s{1,}");
+                    string[] split_package_line = line_of_package[3].Split('_');
+                    string package = split_package_line[0];
+                    package = package.ToUpper();
+                    string file_name = Path.GetFileName(file_path);
+                    try
+                    {
+                        Product_Name = MyIni.Read(package, "Product_Name");
+                    }
+                    catch (Exception)
+                    {
+
+                    }
+                    if (package == "")
+                    {
+                        File.Delete(file_path);
+                    }
+                    else
+                    {
+                        if (!Directory.Exists(Final_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng))  //check if local folder exists
+                            Directory.CreateDirectory(Final_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng);
+                        if (!Directory.Exists(Server_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng))  //check if local folder exists
+                            Directory.CreateDirectory(Server_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng);
+                        if (!File.Exists(Final_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name))  //check if local folder exists
+                        {
+                            File.Copy(file_path, Final_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name);
+                        }
+                        if (!File.Exists(Server_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name))  //check if local folder exists
+                        {
+                            File.Move(file_path, Server_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name);
+                        }
+                        else
+                            File.Delete(file_path);
+                    }
+                }
+                else
+                    File.Delete(file_path);
+
+            }
+            catch (Exception)
+            {
+                File.Delete(file_path);
+            }
+        }
+
+        public void fusion_check_file_type(string file_path, string Final_Path)
+        {
+            string type = System.IO.Path.GetExtension(file_path);
+            if (type == ".txt")
+                fusion_txt(file_path, Final_Path);
+            if (type == ".summary")
+                fusion_summary(file_path, Final_Path);
+        }
+        public void fusion_Download(int previous_date, int current_date, string user, string password, string FTP_URL_Tester_Path, string FTP_URL_Ori)
+        {
+
+            string path = Application.StartupPath.ToString();
+            var MyIni = new IniFile(path + "\\" + "Tester.ini");            //INI section to read related tester information
+            int s = new int();
+            string local_Tester_Path = MyIni.Read("Local_File_Path", "Info");
+            string Final_Path = MyIni.Read("Final_Path", "Info");
+            List<string> list_File_Name_Only = GetFileList_Name_Only(FTP_URL_Ori, FTP_URL_Tester_Path, user, password);
+            string _LocalDirectory = local_Tester_Path;  //Local directory where the files will be downloaded
+            //File.AppendAllText(path + "//download_LogFile.txt", "Start Download " + DateTime.Now.ToString() + "    " + FTP_URL_Tester_Path + "  " + Environment.NewLine);
+            Ping pingFTP = new Ping();
+            PingReply PR = pingFTP.Send(FTP_URL_Ori);
+            if (PR.Status.ToString().Equals("Success"))
+            {
+                if (!Directory.Exists(local_Tester_Path))  //check if local folder exists
+                    Directory.CreateDirectory(local_Tester_Path);
+                for (int A = 0; A < list_File_Name_Only.Count; A++)
+                {
+                    string date = Fusion_Parse_File_Date(list_File_Name_Only[A]);
+                    if (date != "")
+                    {
+                        bool result = int.TryParse(date, out s);
+                        if (result == true)
+                        {
+                            if (Convert.ToInt32(date) >= previous_date && Convert.ToInt32(date) < current_date)
+                            {
+                                try
+                                {
+                                    FtpWebRequest requestFileDownload = (FtpWebRequest)WebRequest.Create("ftp://" + FTP_URL_Tester_Path + "//" + list_File_Name_Only[A]);      //use stream method and ftpwebrequest method to download file
+                                    requestFileDownload.Credentials = new NetworkCredential(user, password);
+                                    requestFileDownload.Method = WebRequestMethods.Ftp.DownloadFile;
+                                    FtpWebResponse responseFileDownload = (FtpWebResponse)requestFileDownload.GetResponse();
+                                    Stream responseStream = responseFileDownload.GetResponseStream();
+                                    FileStream writeStream = new FileStream(local_Tester_Path + "/" + list_File_Name_Only[A], FileMode.Create);
+                                    int Length = 2048;
+                                    Byte[] buffer = new Byte[Length];
+                                    int bytesRead = responseStream.Read(buffer, 0, Length);
+                                    while (bytesRead > 0)
+                                    {
+                                        writeStream.Write(buffer, 0, bytesRead);
+                                        bytesRead = responseStream.Read(buffer, 0, Length);
+                                    }
+                                    responseStream.Close();
+                                    writeStream.Close();
+                                    //System.Threading.Thread.Sleep(10);
+                                    requestFileDownload = null;
+
+                                    fusion_check_file_type(local_Tester_Path + "/" + list_File_Name_Only[A], Final_Path);
+                                }
+
+                                catch (TimeoutException)
+                                {
+                                    //throw ex;
+                                }
+
+                                catch (Exception)
+                                {
+
+                                }
+                            }
+                        }
+                    }
+                }
+            }//end of check connection PR
+            else
+            {
+                File.AppendAllText(path + "//date.txt", DateTime.Now.ToString() + "    " + FTP_URL_Ori + "  " + Environment.NewLine);
+            }
+        }
+        /*--------------------------------------------------------------------------------------------Fusion_STD-----------------------------------------------------------------------------------------------------*/
+        public void fusion_std_Download(int previous_date, int current_date, string user, string password, string Second_layer_dir, string FTP_URL_Ori)
+        {
+
+            string path = Application.StartupPath.ToString();
+            var MyIni = new IniFile(path + "\\" + "Tester.ini");            //INI section to read related tester information
+            int s = new int();
+            string local_Tester_Path = MyIni.Read("Local_File_Path", "Info");
+            string Dlog_Server_Path = MyIni.Read("Dlog_Server_Path", "Info");
+            List<string> list_File_Name_Only = GetFileList_Name_Only(FTP_URL_Ori, Second_layer_dir, user, password);
+            Ping pingFTP = new Ping();
+            PingReply PR = pingFTP.Send(FTP_URL_Ori);
+            if (PR.Status.ToString().Equals("Success"))
+            {
+                if (!Directory.Exists(local_Tester_Path))  //check if local folder exists
+                    Directory.CreateDirectory(local_Tester_Path);
+                for (int A = 0; A < list_File_Name_Only.Count; A++)
+                {
+                    string date = Fusion_Parse_File_Date(list_File_Name_Only[A]);
+                    if (date != "")
+                    {
+                        bool result = int.TryParse(date, out s);
+                        if (result == true)
+                        {
+                            if (Convert.ToInt32(date) >= previous_date && Convert.ToInt32(date) < current_date)
+                            {
+                                XmlDocument doc = new XmlDocument();
+                                doc.Load(path + "\\Fusion_Partial_Name.xml");
+                                XmlNode node = doc.DocumentElement.SelectSingleNode("/Partial_Name");
+                                List<string> list_Package_Name = node.InnerText.Split((new Char[] { '\r', '\n' }), StringSplitOptions.RemoveEmptyEntries).ToList();
+
+                                string[] file_partial_name = list_File_Name_Only[A].Split('_');
+                                string my_partial_name = file_partial_name[0];
+
+                                if (my_partial_name != "" && list_Package_Name.Contains(my_partial_name))
+                                {
+                                    string Product_Name = "";
+                                    Product_Name = MyIni.Read(my_partial_name, "Fusion_Partial_Name");
+
+                                    try
+                                    {
+                                        FtpWebRequest requestFileDownload = (FtpWebRequest)WebRequest.Create("ftp://" + Second_layer_dir + "//" + list_File_Name_Only[A]);      //use stream method and ftpwebrequest method to download file
+                                        requestFileDownload.Credentials = new NetworkCredential(user, password);
+                                        requestFileDownload.Method = WebRequestMethods.Ftp.DownloadFile;
+                                        FtpWebResponse responseFileDownload = (FtpWebResponse)requestFileDownload.GetResponse();
+                                        Stream responseStream = responseFileDownload.GetResponseStream();
+                                        FileStream writeStream = new FileStream(local_Tester_Path + "/" + list_File_Name_Only[A], FileMode.Create);
+                                        int Length = 2048;
+                                        Byte[] buffer = new Byte[Length];
+                                        int bytesRead = responseStream.Read(buffer, 0, Length);
+                                        while (bytesRead > 0)
+                                        {
+                                            writeStream.Write(buffer, 0, bytesRead);
+                                            bytesRead = responseStream.Read(buffer, 0, Length);
+                                        }
+                                        responseStream.Close();
+                                        writeStream.Close();
+                                        //System.Threading.Thread.Sleep(10);
+                                        requestFileDownload = null;
+
+                                        fusion_std_transfer(local_Tester_Path + "/" + list_File_Name_Only[A], Dlog_Server_Path, Product_Name);
+                                    }
+
+                                    catch (TimeoutException)
+                                    {
+                                        //throw ex;
+                                    }
+
+                                    catch (Exception)
+                                    {
+
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }//end of check connection PR
+            else
+            {
+                File.AppendAllText(path + "//date.txt", DateTime.Now.ToString() + "    " + FTP_URL_Ori + "  " + Environment.NewLine);
+            }
+        }
+        public void fusion_std_transfer(string file_path, string Final_Path, string Product_Name)//Read Fusion Text File
+        {
+            string budget = null;
+            string folder_date = Path.GetFileName(file_path);
+            string[] folder_date_parse = folder_date.Split('_');
+            int Month_int = new int();
+            string Month = folder_date_parse[6].Substring(4, 2);
+            int.TryParse(Month, out Month_int);
+            string Month_in_Eng = CultureInfo.CurrentCulture.DateTimeFormat.GetMonthName(Month_int);
+            Month_in_Eng = Month + "_" + Month_in_Eng.ToUpper();
+
+            if (Month_int <= 6)
+            {
+                budget = folder_date_parse[6].Substring(2, 2) + "K";
+            }
+            if (Month_int >= 7 && Month_int <= 12)
+            {
+                budget = folder_date_parse[6].Substring(2, 2) + "S";
+            }
+
+            string file_name = Path.GetFileName(file_path);
+            try
+            {
+                if (!Directory.Exists(Final_Path + "\\" + Product_Name + "\\" + budget + "\\" + Month_in_Eng))  //check if server folder exists
+                    Directory.CreateDirectory(Final_Path + "\\" + Product_Name + "\\" + budget + "\\" + Month_in_Eng);
+
+                if (!File.Exists(Final_Path + "\\" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name))  //check if local folder exists
+                {
+                    File.Copy(file_path, Final_Path + "\\" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name);
+                }
+                else
+                    File.Delete(file_path);
+
+            }
+            catch (Exception)
+            {
+                File.Delete(file_path);
+            }
+        }
+        /*----------------------------------------------------------------------------------------------T2K_T3347-------------------------------------------------------------------------------------------------------*/
+        public void t3347_t2k_Download_1stlayer(int previous_date, int current_date, string user, string password, string FTP_URL_Tester_Path, string FTP_URL_Ori, string Second_layer_dir, string File_download, string Folder_download, string Tester_Name, string Tester_type, Boolean usebool)
+        {
+            string path = Application.StartupPath.ToString();
+            var MyIni = new IniFile(path + "//" + "Tester.ini");            //INI section to read related tester information
+            string local_Tester_Path = MyIni.Read("Local_File_Path", "Info");
+            string Final_Path = MyIni.Read("Final_Path", "Info");
+            List<string> list_File_Name_Only = GetFileList_Name_Only_option(FTP_URL_Ori, FTP_URL_Tester_Path, user, password, usebool);
+            string _LocalDirectory = local_Tester_Path;
+            Ping pingFTP = new Ping();
+            PingReply PR = pingFTP.Send(FTP_URL_Ori);
+            if (PR.Status.ToString().Equals("Success"))
+            {
+                if (!Directory.Exists(local_Tester_Path))  //check if local folder exists
+                    Directory.CreateDirectory(local_Tester_Path);
+                //main path
+                for (int A = 0; A < list_File_Name_Only.Count; A++)
+                {
+                    string[] split_Filename = list_File_Name_Only[A].Split('.');
+                    string FileName = split_Filename[0];
+
+                    if (FileName == File_download)
+                    {
+                        string download_path = "ftp://" + FTP_URL_Tester_Path + "//" + list_File_Name_Only[A];
+                        string dateString = DateTime.Now.ToString("yyyyMMdd");
+                        string File_local_path = local_Tester_Path + "\\" + dateString + "_" + Tester_Name + "_" + list_File_Name_Only[A];
+                        t3347_t2k_webrequest(user, password, download_path, File_local_path, Final_Path, Folder_download, Tester_type, usebool);
+                    }
+                }
+                //download 2nd layer
+                t3347_t2k_Download_2ndlayer(previous_date, current_date, user, password, Second_layer_dir, FTP_URL_Ori, File_download, Folder_download, Tester_type, usebool);
+            }//end of check connection PR
+            else
+            {
+                File.AppendAllText(path + "//date.txt", DateTime.Now.ToString() + "    " + FTP_URL_Ori + "  " + Environment.NewLine);
+            }
+
+        }
+        public void t3347_t2k_Download_2ndlayer(int previous_date, int current_date, string user, string password, string Second_layer_dir, string FTP_URL_Ori, string File_download, string Folder_download, string Tester_type, Boolean usebool)
+        {
+            string path = Application.StartupPath.ToString();
+            var MyIni = new IniFile(path + "//" + "Tester.ini");            //INI section to read related tester information
+            string local_Tester_Path = MyIni.Read("Local_File_Path", "Info");
+            string Final_Path = MyIni.Read("Final_Path", "Info");
+            List<string> list_File_Name_Only = GetFileList_Name_Only_option(FTP_URL_Ori, Second_layer_dir, user, password, usebool);
+            string _LocalDirectory = local_Tester_Path;
+            Ping pingFTP = new Ping();
+            PingReply PR = pingFTP.Send(FTP_URL_Ori);
+            if (PR.Status.ToString().Equals("Success"))
+            {
+                if (!Directory.Exists(local_Tester_Path))  //check if local folder exists
+                    Directory.CreateDirectory(local_Tester_Path);
+                //summaryBU
+                for (int B = 0; B < list_File_Name_Only.Count; B++)
+                {
+                    string[] file_date = list_File_Name_Only[B].Split('_');
+                    string date = file_date[0];
+                    string download_path = "ftp://" + Second_layer_dir + "//" + list_File_Name_Only[B];
+                    string File_local_path = local_Tester_Path + "\\" + list_File_Name_Only[B];
+                    if (Tester_type == "T3347" && list_File_Name_Only[B].Contains(File_download))
+                    {
+                        if (date.Length == 6)
+                        {
+                            string full_date = "20" + date;
+                            if (Convert.ToInt32(full_date) >= previous_date && Convert.ToInt32(full_date) < current_date)
+                            {
+                                t3347_t2k_webrequest(user, password, download_path, File_local_path, Final_Path, Folder_download, Tester_type, usebool);
+                            }
+                        }
+                    }
+                    if (Tester_type == "T2K" && list_File_Name_Only[B].Contains(File_download))
+                    {
+                        if (date.Length == 8)
+                        {
+                            string full_date = date;
+                            if (Convert.ToInt32(full_date) >= previous_date && Convert.ToInt32(full_date) < current_date)
+                            {
+                                t3347_t2k_webrequest(user, password, download_path, File_local_path, Final_Path, Folder_download, Tester_type, usebool);
+                            }
+                        }
+                    }
+                }
+            }//end of check connection PR
+            else
+            {
+                File.AppendAllText(path + "//date.txt", DateTime.Now.ToString() + "    " + FTP_URL_Ori + "  " + Environment.NewLine);
+            }
+        }
+        public void t3347_t2k_webrequest(string user, string password, string download_path, string File_local_path, string Final_Path, string Folder_download, string Tester_type, Boolean usebool)
+        {
+            try
+            {
+                FtpWebRequest requestFileDownload = (FtpWebRequest)WebRequest.Create(download_path);      //use stream method and ftpwebrequest method to download file
+                requestFileDownload.UsePassive = usebool;
+                requestFileDownload.Credentials = new NetworkCredential(user, password);
+                requestFileDownload.Method = WebRequestMethods.Ftp.DownloadFile;
+                FtpWebResponse responseFileDownload = (FtpWebResponse)requestFileDownload.GetResponse();
+                Stream responseStream = responseFileDownload.GetResponseStream();
+                FileStream writeStream = new FileStream(File_local_path, FileMode.Create);
+                int Length = 2048;
+                Byte[] buffer = new Byte[Length];
+                int bytesRead = responseStream.Read(buffer, 0, Length);
+                while (bytesRead > 0)
+                {
+                    writeStream.Write(buffer, 0, bytesRead);
+                    bytesRead = responseStream.Read(buffer, 0, Length);
+                }
+                responseStream.Close();
+                writeStream.Close();
+                //System.Threading.Thread.Sleep(10);
+                requestFileDownload = null;
+
+                t3347_t2k_final(File_local_path, Final_Path, Folder_download, Tester_type);
+            }
+            catch (TimeoutException)
+            {
+                //throw ex;
+            }
+            catch (Exception)
+            {
+                //throw ex;
+            }
+        }
+        public void t3347_t2k_final(string file_path, string Final_Path, string Folderdownload, string Tester_type)
+        {
+            try
+            {
+                FileInfo file = new FileInfo(file_path);
+                long size = file.Length;
+                if (size > 0)
+                {
+                    List<DateTime> logDates = new List<DateTime>();
+
+                    //Define regex string
+                    string pattern = @"(?<logDate>(\d){2}/(\d){2}/(\d){2})";
+                    Regex reg = new Regex(pattern);
+
+                    //read log content
+                    string logContent = File.ReadAllText(file_path);
+                    logContent = Regex.Replace(logContent, "(?<!\r)\n", "\r\n");
+                    File.WriteAllText(file_path, logContent);
+
+                    //run regex
+                    MatchCollection matches = reg.Matches(logContent);
+
+                    //iterate over matches
+                    foreach (Match m in matches)
+                    {
+                        DateTime logTime = DateTime.ParseExact(m.Groups["logDate"].Value, "yy/MM/dd", CultureInfo.InvariantCulture);
+                        logDates.Add(logTime);
+                    }
+
+                    string path = Application.StartupPath.ToString();
+                    var MyIni = new IniFile(path + "\\" + "Tester.ini");            //INI section to read related tester information
+                    string Server_Path = MyIni.Read("Server_Path", "Info");
+
+                    string first_data_date = logDates[0].ToString("yyyyMMdd");
+                    int date_count = number(logDates.Count - 1, Tester_type);
+                    string last_data_date = logDates[date_count].ToString("yyyyMMdd");
+
+                    string budget = null;
+                    string first_data_Month = first_data_date.Substring(4, 2);
+                    string last_data_Month = last_data_date.Substring(4, 2);
+                    int first_data_Month_int = new int();
+                    int last_data_Month_int = new int();
+                    int.TryParse(first_data_Month, out first_data_Month_int);
+                    int.TryParse(last_data_Month, out last_data_Month_int);
+
+                    string filter_date = date_Month_Day_Previous();
+                    int filter_date_int = new int();
+                    int last_data_date_int = new int();
+                    int.TryParse(last_data_date, out last_data_date_int);
+                    int.TryParse(filter_date, out filter_date_int);
+
+                    DateTime iterator;
+                    DateTime limit;
+                    if (last_data_date_int < filter_date_int)
+                    {
+                        File.Delete(file_path);
+                        return;
+                    }
+
+                    if (last_data_Month_int != first_data_Month_int)
+                    {
+                        iterator = new DateTime(logDates[0].Year, logDates[0].Month, 1);
+                        limit = logDates[logDates.Count - 1];
+                        while (iterator <= limit)
+                        {
+                            string Month_in_Eng = CultureInfo.CurrentCulture.DateTimeFormat.GetMonthName(iterator.Month);
+                            string date_string = iterator.ToString("yyyyMMdd");
+                            Month_in_Eng = date_string.Substring(4, 2) + "_" + Month_in_Eng.ToUpper();
+                            if (iterator.Month <= 6)
+                            {
+                                budget = date_string.Substring(2, 2) + "K";
+                            }
+                            if (iterator.Month >= 7)
+                            {
+                                budget = date_string.Substring(2, 2) + "S";
+                            }
+
+                            string file_name = Path.GetFileName(file_path);
+                            if (!Directory.Exists(Final_Path + "\\" + Folderdownload + "\\" + budget + "\\" + Month_in_Eng))  //check if local folder exists
+                                Directory.CreateDirectory(Final_Path + "\\" + Folderdownload + "\\" + budget + "\\" + Month_in_Eng);
+                            if (!Directory.Exists(Server_Path + "\\" + Folderdownload + "\\" + budget + "\\" + Month_in_Eng))  //check if local folder exists
+                                Directory.CreateDirectory(Server_Path + "\\" + Folderdownload + "\\" + budget + "\\" + Month_in_Eng);
+
+                            if (File.Exists(Final_Path + "\\" + Folderdownload + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name))  //check if file exists and delete it
+                                File.Delete(Final_Path + "\\" + Folderdownload + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name);
+                            if (File.Exists(Server_Path + "\\" + Folderdownload + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name))  //check if file exists and delete it
+                                File.Delete(Server_Path + "\\" + Folderdownload + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name);
+
+                            File.Copy(file_path, Final_Path + "\\" + Folderdownload + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name);
+                            File.Copy(file_path, Server_Path + "\\" + Folderdownload + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name);
+
+                            iterator = iterator.AddMonths(1);
+                        }
+                    }
+                    else
+                    {
+                        string Month_in_Eng = CultureInfo.CurrentCulture.DateTimeFormat.GetMonthName(first_data_Month_int);
+                        Month_in_Eng = first_data_Month + "_" + Month_in_Eng.ToUpper();
+                        if (first_data_Month_int <= 6)
+                        {
+                            budget = first_data_date.Substring(2, 2) + "K";
+                        }
+                        if (first_data_Month_int >= 7)
+                        {
+                            budget = first_data_date.Substring(2, 2) + "S";
+                        }
+                        string file_name = Path.GetFileName(file_path);
+                        if (!Directory.Exists(Final_Path + "\\" + Folderdownload + "\\" + budget + "\\" + Month_in_Eng))  //check if local folder exists
+                            Directory.CreateDirectory(Final_Path + "\\" + Folderdownload + "\\" + budget + "\\" + Month_in_Eng);
+                        if (!Directory.Exists(Server_Path + "\\" + Folderdownload + "\\" + budget + "\\" + Month_in_Eng))  //check if local folder exists
+                            Directory.CreateDirectory(Server_Path + "\\" + Folderdownload + "\\" + budget + "\\" + Month_in_Eng);
+
+                        if (File.Exists(Final_Path + "\\" + Folderdownload + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name))  //check if file exists and delete it
+                            File.Delete(Final_Path + "\\" + Folderdownload + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name);
+                        if (File.Exists(Server_Path + "\\" + Folderdownload + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name))  //check if file exists and delete it
+                            File.Delete(Server_Path + "\\" + Folderdownload + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name);
+
+                        File.Copy(file_path, Final_Path + "\\" + Folderdownload + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name);
+                        File.Copy(file_path, Server_Path + "\\" + Folderdownload + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name);
+                    }
+                }
+                else
+                {
+                    File.Delete(file_path);
+                }
+            }
+            catch (Exception)
+            {
+                File.Delete(file_path);
+            }
+        }
+        public int number(int total_count, string Tester_type)
+        {
+            int total_date_final;
+            if (Tester_type == "T2K")
+            {
+                total_date_final = total_count;
+                return total_date_final;
+            }
+            if (Tester_type == "T3347")
+            {
+                total_date_final = total_count - 1;
+                return total_date_final;
+            }
+            return 0;
+        }
+        /*----------------------------------------------------------------------------------------------LTX-------------------------------------------------------------------------------------------------------*/
+        public void LTX_Download(int previous_date, int current_date, string User_ini, string password_ini, string FTP_URL_Tester_Path, string FTP_URL_Ori, string tester)
+        {
+            string path = Application.StartupPath.ToString();
+            var MyIni = new IniFile(path + "\\" + "Tester.ini");            //INI section to read related tester information
+            int s = new int();
+            string local_Tester_Path = MyIni.Read("Local_File_Path", "Info");
+            string Final_Path = MyIni.Read("Final_Path", "Info");
+            string Server_Path = MyIni.Read("Server_Path", "Info");
+            string datalog_DL = MyIni.Read("Datalog", "Info");
+            string Dlog_Server_Path = MyIni.Read("Dlog_Server_Path", "Info");
+            List<string> list_File_Name_Only = GetFileList_Name_Only(FTP_URL_Ori, FTP_URL_Tester_Path, User_ini, password_ini);
+            string _LocalDirectory = local_Tester_Path;  //Local directory where the files will be downloaded
+            //File.AppendAllText(path + "//download_LogFile.txt", "Start Download " + DateTime.Now.ToString() + "    " + FTP_URL_Tester_Path + "  " + Environment.NewLine);
+            Ping pingFTP = new Ping();
+            PingReply PR = pingFTP.Send(FTP_URL_Ori);
+            if (PR.Status.ToString().Equals("Success"))
+            {
+                if (!Directory.Exists(local_Tester_Path))  //check if local folder exists
+                    Directory.CreateDirectory(local_Tester_Path);
+                for (int A = 0; A < list_File_Name_Only.Count; A++)
+                {
+                    string date = LTX_Parse_File_Date(list_File_Name_Only[A], tester);
+                    string type = list_File_Name_Only[A].Substring(list_File_Name_Only[A].Length - 2, 2);
+                    if (date != "")
+                    {
+                        bool result = int.TryParse(date, out s);
+                        if (result == true)
+                        {
+                            if (Convert.ToInt32(date) >= previous_date && Convert.ToInt32(date) < current_date)
+                            {
+                                try
+                                {
+                                    FtpWebRequest requestFileDownload = (FtpWebRequest)WebRequest.Create("ftp://" + FTP_URL_Tester_Path + "//" + list_File_Name_Only[A]);      //use stream method and ftpwebrequest method to download file
+                                    requestFileDownload.Credentials = new NetworkCredential(User_ini, password_ini);
+                                    requestFileDownload.Method = WebRequestMethods.Ftp.DownloadFile;
+                                    FtpWebResponse responseFileDownload = (FtpWebResponse)requestFileDownload.GetResponse();
+                                    Stream responseStream = responseFileDownload.GetResponseStream();
+                                    FileStream writeStream = new FileStream(local_Tester_Path + "/" + list_File_Name_Only[A], FileMode.Create);
+                                    int Length = 2048;
+                                    Byte[] buffer = new Byte[Length];
+                                    int bytesRead = responseStream.Read(buffer, 0, Length);
+                                    while (bytesRead > 0)
+                                    {
+                                        writeStream.Write(buffer, 0, bytesRead);
+                                        bytesRead = responseStream.Read(buffer, 0, Length);
+                                    }
+                                    responseStream.Close();
+                                    writeStream.Close();
+                                    //System.Threading.Thread.Sleep(10);
+                                    requestFileDownload = null;
+
+                                    if (type == "lt")
+                                    {
+                                        LTX_Segregate(local_Tester_Path + "/" + list_File_Name_Only[A], Final_Path, date, Server_Path);
+                                    }
+                                    if (type == "dg" && datalog_DL =="Y")
+                                    {
+                                        LTX_Segregate_Dlog(local_Tester_Path + "/" + list_File_Name_Only[A], date, Dlog_Server_Path);
+                                    }
+                                }
+
+                                catch (TimeoutException)
+                                {
+                                    //throw ex;
+                                }
+
+                                catch (Exception)
+                                {
+
+                                }
+                            }
+                        }
+                    }
+                }
+            }//end of check connection PR
+            else
+            {
+                File.AppendAllText(path + "//date.txt", DateTime.Now.ToString() + "    " + FTP_URL_Ori + "  " + Environment.NewLine);
+            }
+        }
+
+        public void LTX_Download_Histo(int previous_date, int current_date, string User_ini, string password_ini, string FTP_URL_Tester_Path, string FTP_URL_Ori, string tester)
+        {
+            string path = Application.StartupPath.ToString();
+            var MyIni = new IniFile(path + "\\" + "Tester.ini");            //INI section to read related tester information
+            int s = new int();
+            string local_Tester_Path = MyIni.Read("Local_File_Path", "Info");
+            string Final_Path = MyIni.Read("Final_Path", "Info");
+            string Server_Path = MyIni.Read("Server_Path", "Info");
+            string Dlog_Server_Path = MyIni.Read("Dlog_Server_Path", "Info");
+            string product_type = MyIni.Read("File_download", tester);
+            List<string> list_File_Name_Only = GetFileList_Name_Only(FTP_URL_Ori, FTP_URL_Tester_Path, User_ini, password_ini);
+            string _LocalDirectory = local_Tester_Path;  //Local directory where the files will be downloaded
+                                                         //File.AppendAllText(path + "//download_LogFile.txt", "Start Download " + DateTime.Now.ToString() + "    " + FTP_URL_Tester_Path + "  " + Environment.NewLine);
+            Ping pingFTP = new Ping();
+            PingReply PR = pingFTP.Send(FTP_URL_Ori);
+            if (PR.Status.ToString().Equals("Success"))
+            {
+                if (!Directory.Exists(local_Tester_Path))  //check if local folder exists
+                    Directory.CreateDirectory(local_Tester_Path);
+                for (int A = 0; A < list_File_Name_Only.Count; A++)
+                {
+                    try
+                    {
+                        string date = LTX_Parse_File_Date(list_File_Name_Only[A], tester);
+                        string type = list_File_Name_Only[A].Substring(list_File_Name_Only[A].Length - 2, 2);
+                        string product = list_File_Name_Only[A].Substring(0, 11);
+                        product = product.ToUpper();
+                        if (date != "" && type == "lt")
+                            if (product == "x" + product_type || product == "X" + product_type || product == product_type)
+                            {
+                                bool result = int.TryParse(date, out s);
+                                if (result == true)
+                                {
+                                    if (Convert.ToInt32(date) >= previous_date && Convert.ToInt32(date) < current_date)
+                                    {
+                                        try
+                                        {
+                                            FtpWebRequest requestFileDownload = (FtpWebRequest)WebRequest.Create("ftp://" + FTP_URL_Tester_Path + "//" + list_File_Name_Only[A]);      //use stream method and ftpwebrequest method to download file
+                                            requestFileDownload.Credentials = new NetworkCredential(User_ini, password_ini);
+                                            requestFileDownload.Method = WebRequestMethods.Ftp.DownloadFile;
+                                            FtpWebResponse responseFileDownload = (FtpWebResponse)requestFileDownload.GetResponse();
+                                            Stream responseStream = responseFileDownload.GetResponseStream();
+                                            FileStream writeStream = new FileStream(local_Tester_Path + "/" + list_File_Name_Only[A], FileMode.Create);
+                                            int Length = 2048;
+                                            Byte[] buffer = new Byte[Length];
+                                            int bytesRead = responseStream.Read(buffer, 0, Length);
+                                            while (bytesRead > 0)
+                                            {
+                                                writeStream.Write(buffer, 0, bytesRead);
+                                                bytesRead = responseStream.Read(buffer, 0, Length);
+                                            }
+                                            responseStream.Close();
+                                            writeStream.Close();
+                                            //System.Threading.Thread.Sleep(10);
+                                            requestFileDownload = null;
+
+                                            LTX_Segregate2(local_Tester_Path + "/" + list_File_Name_Only[A], Final_Path, date, Server_Path, product);
+                                        }
+
+                                        catch (TimeoutException)
+                                        {
+                                            //throw ex;
+                                        }
+
+                                        catch (Exception)
+                                        {
+
+                                        }
+                                    }
+                                }
+                            }
+                    }
+                    catch (Exception) { }
+                }//end of check connection PR                    
+            }
+            else
+                File.AppendAllText(path + "//date.txt", DateTime.Now.ToString() + "    " + FTP_URL_Ori + "  " + Environment.NewLine);
+        }
+
+        public string LTX_Parse_File_Date(string filename, string tester)
+        {
+            string Date = "";
+            try
+            {
+                string path = Application.StartupPath;
+                var MyIni = new IniFile(path + "\\" + "Tester.ini");            //INI section to read related tester information
+                string product_type = MyIni.Read("File_download", tester);
+                string[] line_of_package = product_type.Split('/');
+                string[] file_package = filename.Split('_');
+                long s = new long();
+                for (int i = 0; i < line_of_package.Count(); i++)
+                {
+                    if (filename.Contains(line_of_package[i]) && ((filename.Substring(filename.Length - 2, 2) == "lt") || (filename.Substring(filename.Length - 2, 2) == "dg")))
+                    {
+                        string[] date = filename.Split('_');
+                        if (date.Length > 6)
+                            if (date[6] != "")
+                            {
+                                bool result = Int64.TryParse(date[6], out s);
+                                if (result == true && s >= 100000000000)
+                                {
+                                    Date = date[6].Substring(0, 6);
+                                    Date = "20" + Date;
+                                    return Date;
+                                }
+                            }
+                        if (date[5] != "")
+                        {
+                            bool result = Int64.TryParse(date[5], out s);
+                            if (result == true && s >= 100000000000)
+                            {
+                                try
+                                {
+                                    Date = date[5].Substring(0, 6);
+                                    Date = "20" + Date;
+                                    return Date;
+                                }
+                                catch (Exception)
+                                {
+
+                                }
+                            }
+                        }
+                    }
+                }
+                return Date;
+            }
+            catch (Exception)
+            {
+                return Date;
+            }
+        }
+
+        public void LTX_Segregate(string file_path, string Final_Path, string Date, string Server_Path)
+        {
+            string path = Application.StartupPath.ToString();
+            var MyIni = new IniFile(path + "\\" + "Tester.ini");            //INI section to read related tester information
+            //string Server_Path = MyIni.Read("Server_Path", "Info");
+            string budget = null;
+            //string folder_date = Path.GetFileName(file_path);
+            //string[] folder_date_parse = folder_date.Split('_');
+            int Month_int = new int();
+            string Month = Date.Substring(4, 2);
+            // string Year = folder_date_parse[6].Substring(0, 4);
+            int.TryParse(Month, out Month_int);
+            string Month_in_Eng = CultureInfo.CurrentCulture.DateTimeFormat.GetMonthName(Month_int);
+            Month_in_Eng = Month + "_" + Month_in_Eng.ToUpper();
+
+            if (Month_int <= 6)
+            {
+                budget = Date.Substring(2, 2) + "K";
+            }
+            if (Month_int >= 7)
+            {
+                budget = Date.Substring(2, 2) + "S";
+            }
+
+            try
+            {
+                string[] alltext = File.ReadAllLines(file_path);
+                string logContent = File.ReadAllText(file_path);
+                logContent = Regex.Replace(logContent, "(?<!\r)\n", "\r\n");
+                File.WriteAllText(file_path, logContent);
+                if (alltext != null)
+                {
+                    string Product_Name = "";
+                    string segre_text = alltext[7];
+                    string[] line_of_package = Regex.Split(segre_text, @"\s{1,}");
+                    //string[] split_package_line = line_of_package[1].Split('_');
+                    string package = line_of_package[1];
+                    string[] package2 = package.Split('_');
+                    package = package2[0].ToUpper();
+                    string file_name = Path.GetFileName(file_path);
+                    try
+                    {
+                        Product_Name = MyIni.Read(package, "Product_Name");
+                    }
+                    catch (Exception)
+                    {
+
+                    }
+                    if (package == "")
+                    {
+                        File.Delete(file_path);
+                    }
+                    else
+                    {
+                        if (!Directory.Exists(Final_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng))  //check if local folder exists
+                        {
+                            Directory.CreateDirectory(Final_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng);
+                        }
+                        if (!Directory.Exists(Server_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng))  //check if local folder exists
+                        {
+                            Directory.CreateDirectory(Server_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng);
+                        }
+                        if (!File.Exists(Final_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name))  //check if local folder exists
+                        {
+                            File.Copy(file_path, Final_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name);
+                        }
+                        if (!File.Exists(Server_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name))  //check if local folder exists
+                        {
+                            File.Move(file_path, Server_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name);
+                        }
+                        else
+                            File.Delete(file_path);
+                    }
+                }
+                else
+                    File.Delete(file_path);
+            }
+            catch (Exception)
+            {
+                File.Delete(file_path);
+            }
+        }
+
+        public void LTX_Segregate2(string file_path, string Final_Path, string Date, string Server_Path, string package)
+        {
+            string Product_Name = "ATIC140S_Histo";
+            string path = Application.StartupPath.ToString();
+            var MyIni = new IniFile(path + "\\" + "Tester.ini");            //INI section to read related tester information
+            //string Server_Path = MyIni.Read("Server_Path", "Info");
+            string budget = null;
+            //string folder_date = Path.GetFileName(file_path);
+            //string[] folder_date_parse = folder_date.Split('_');
+            int Month_int = new int();
+            string Month = Date.Substring(4, 2);
+            // string Year = folder_date_parse[6].Substring(0, 4);
+            int.TryParse(Month, out Month_int);
+            string Month_in_Eng = CultureInfo.CurrentCulture.DateTimeFormat.GetMonthName(Month_int);
+            Month_in_Eng = Month + "_" + Month_in_Eng.ToUpper();
+
+            if (Month_int <= 6)
+            {
+                budget = Date.Substring(2, 2) + "K";
+            }
+            if (Month_int >= 7)
+            {
+                budget = Date.Substring(2, 2) + "S";
+            }
+
+            try
+            {
+                string logContent = File.ReadAllText(file_path);
+                logContent = Regex.Replace(logContent, "(?<!\r)\n", "\r\n");
+                File.WriteAllText(file_path, logContent);
+                string file_name = Path.GetFileName(file_path);
+                if (!Directory.Exists(Final_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng))  //check if local folder exists
+                {
+                    Directory.CreateDirectory(Final_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng);
+                }
+                if (!Directory.Exists(Server_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng))  //check if local folder exists
+                {
+                    Directory.CreateDirectory(Server_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng);
+                }
+                if (!File.Exists(Final_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name))  //check if local folder exists
+                {
+                    File.Copy(file_path, Final_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name);
+                }
+                if (!File.Exists(Server_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name))  //check if local folder exists
+                {
+                    File.Move(file_path, Server_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name);
+                }
+            }
+            catch (Exception)
+            {
+                File.Delete(file_path);
+            }
+        }
+
+
+        public void LTX_Segregate_Dlog(string file_path, string Date, string Server_Path)
+        {
+
+            string path = Application.StartupPath.ToString();
+            var MyIni = new IniFile(path + "\\" + "Tester.ini");            //INI section to read related tester information
+                                                                            //string Server_Path = MyIni.Read("Server_Path", "Info");
+            string budget = null;
+            //string folder_date = Path.GetFileName(file_path);
+            //string[] folder_date_parse = folder_date.Split('_');
+            int Month_int = new int();
+            string Month = Date.Substring(4, 2);
+            // string Year = folder_date_parse[6].Substring(0, 4);
+            int.TryParse(Month, out Month_int);
+            string Month_in_Eng = CultureInfo.CurrentCulture.DateTimeFormat.GetMonthName(Month_int);
+            Month_in_Eng = Month + "_" + Month_in_Eng.ToUpper();
+
+            if (Month_int <= 6)
+            {
+                budget = Date.Substring(2, 2) + "K";
+            }
+            if (Month_int >= 7)
+            {
+                budget = Date.Substring(2, 2) + "S";
+            }
+            string file_name = Path.GetFileNameWithoutExtension(file_path);
+            string[] line_of_package = file_name.Split('_');
+            string package = line_of_package[0];
+            package = package.ToUpper();
+            if (package.Substring(0, 1) == "x" || package.Substring(0, 1) == "X")
+            {
+                package = package.Substring(1, package.Length - 1);
+            }
+            string Product_Name = MyIni.Read(package, "Product_Name");
+
+
+
+            if (!Directory.Exists(Server_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng))  //check if local folder exists
+            {
+                Directory.CreateDirectory(Server_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng);
+            }
+            if (!File.Exists(Server_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name))  //check if local folder exists
+            {
+                CreateZipFile(file_path, Server_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name + ".7z");
+                //File.Move(file_path, Server_Path + "\\" + package + "_" + Product_Name + "\\" + budget + "\\" + Month_in_Eng + "\\" + file_name);
+            }
+            else
+                File.Delete(file_path);
+        }
+
+        /*----------------------------------------------------------------------------------------------Compressed Function 7z-------------------------------------------------------------------------------------------------------*/
+        public void CreateZipFolder(string sourceName, string targetName)
+        {
+            // this code use for zip a folder
+            ProcessStartInfo p = new ProcessStartInfo();
+            p.FileName = "C:\\Program Files\\7-Zip\\7zG.exe";
+            p.Arguments = "a -t7z \"" + targetName + "\" \"" + sourceName + "\" -mx=7";
+            p.WindowStyle = ProcessWindowStyle.Minimized;
+
+            Process x = Process.Start(p);
+            x.WaitForExit();
+        }
+
+        public void CreateZipFile(string sourceName, string targetName)
+        {
+            ProcessStartInfo p = new ProcessStartInfo();
+            p.FileName = "C:\\Program Files\\7-Zip\\7zG.exe";
+            p.Arguments = "a -t7z \"" + targetName + "\" \"" + sourceName + "\" -mx=7";
+            p.WindowStyle = ProcessWindowStyle.Minimized;
+            Process x = Process.Start(p);
+            x.WaitForExit();
+
+        }
+
+        private void backgroundWorker1_DoWork(object sender, System.ComponentModel.DoWorkEventArgs e)
+        {
+
+        }
+    }
+}
+
+
+/*----------------------------------------------------------------------------------------------End-------------------------------------------------------------------------------------------------------*/
